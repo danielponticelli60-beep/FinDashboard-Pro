@@ -1,0 +1,6 @@
+{
+  "name": "FinDashboard Pro - Gestione Finanze Personali",
+  "description": "Dashboard finanziaria desktop-first interattiva con gestione movimenti, importazione Excel offline con deduplicazione, gestione Conto Principale con saldo calcolato automatico, piano di allocazione, patrimonio netto, obiettivi finanziari e backup locale.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
