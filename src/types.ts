@@ -123,6 +123,11 @@ export interface Transaction {
   // Transfer accounts
   fromAccountId?: string;
   toAccountId?: string;
+  // Set by the v1->v2 schema migration on transfer-type transactions that are
+  // missing fromAccountId/toAccountId (e.g. imported from Excel without a
+  // resolvable destination account) — never inferred automatically, flagged
+  // for manual completion in Diagnostics instead.
+  transferAccountsIncomplete?: boolean;
 
   status: 'completed' | 'pending';
   notes?: string;
@@ -201,6 +206,34 @@ export interface FilterState {
 export type ActivePage = 'dashboard' | 'transactions' | 'accounts' | 'allocation' | 'wealth' | 'goals' | 'quarterly' | 'annual' | 'settings';
 
 export type CardDebitMode = 'direct_debit' | 'separate_account' | 'excluded';
+
+// Generic account model (schema v2) — supersedes the fixed MainAccountConfig +
+// PrepaidCardConfig pair below. 2-4 configured accounts, see
+// ACCOUNT_LIMITS in FinanceContext.tsx. 'main_account' and 'prepaid_card' are
+// preserved as stable ids by the v1->v2 migration (utils/schemaMigration.ts)
+// so existing Transaction.accountId references keep resolving.
+export type AccountKind =
+  | 'checking'      // Conto corrente
+  | 'credit_card'   // Carta di credito
+  | 'prepaid_card'  // Carta prepagata (kept distinct from credit_card - existing real data uses this)
+  | 'cash'          // Contanti
+  | 'savings'       // Risparmio
+  | 'investment'    // Investimenti
+  | 'other';        // Altro
+
+export interface Account {
+  id: string;
+  kind: AccountKind;
+  label: string;
+  initialBalance: number;
+  initialDate: string; // YYYY-MM-DD
+  maskedNumber?: string;
+  isConfigured: boolean;
+  controlBalance?: number;
+  controlBalanceDate?: string;
+  cardDebitMode?: CardDebitMode;
+  linkedMethods?: string[];
+}
 
 export interface MainAccountConfig {
   id?: string; // 'main_account'
@@ -403,8 +436,12 @@ export interface BackupData {
   exportDate?: string; // backward compat
   version?: string; // backward compat
   transactions: Transaction[];
+  // Schema v1 (legacy): fixed pair. Schema v2: generic `accounts` list.
+  // Both are optional here because a v1 backup has the former, a v2 backup
+  // has the latter — utils/schemaMigration.ts converts v1 -> v2.
   mainAccountConfig?: MainAccountConfig;
   prepaidCardConfig?: PrepaidCardConfig;
+  accounts?: Account[];
   categories?: {
     expense: ExpenseCategory[];
     income: IncomeCategory[];
