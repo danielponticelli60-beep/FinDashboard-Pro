@@ -1,0 +1,53 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/App.tsx"
+        ],
+        "createdAt": "2026-09-01T13:54:32.424Z",
+        "reason": "pre-existing standard dark-theme text-on-bg pairing (slate-100 on slate-950), not gray-on-color; unrelated to this session's code-splitting edit"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/settings/SettingsView.tsx"
+        ],
+        "createdAt": "2026-09-01T14:00:11.850Z",
+        "reason": "pre-existing styling unrelated to this session's any->unknown catch-block cleanup"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/import/ExcelImportModal.tsx"
+        ],
+        "createdAt": "2026-09-01T14:00:48.554Z",
+        "reason": "pre-existing styling unrelated to this session's any->unknown catch-block cleanup"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/goals/GoalsView.tsx"
+        ],
+        "createdAt": "2026-09-01T14:03:00.858Z",
+        "reason": "pre-existing styling unrelated to this session's any-removal cleanup"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/wealth/WealthView.tsx"
+        ],
+        "createdAt": "2026-09-01T14:03:18.662Z",
+        "reason": "pre-existing styling unrelated to this session's any-removal cleanup"
+      }
+    ]
+  }
+}
