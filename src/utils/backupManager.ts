@@ -13,6 +13,7 @@ import {
   IncomeCategory
 } from '../types';
 import { loadSavedPresets } from './excelParser';
+import { getErrorMessage } from './formatters';
 
 export const APP_VERSION = '1.2.0';
 export const SCHEMA_VERSION = 1;
@@ -191,7 +192,7 @@ export function exportTransactionsCSV(transactions: Transaction[]): { filename: 
     'Note'
   ];
 
-  const escapeCSV = (val: any) => {
+  const escapeCSV = (val: unknown) => {
     if (val === undefined || val === null) return '';
     const str = String(val);
     if (str.includes(';') || str.includes('"') || str.includes('\n')) {
@@ -768,10 +769,10 @@ export function parseAndPreviewBackupJSON(jsonString: string): {
       backup: backupData,
       integrity,
     };
-  } catch (err: any) {
+  } catch (err) {
     return {
       isValid: false,
-      error: `Errore nella lettura del JSON: ${err.message || 'Sintassi non valida'}`,
+      error: `Errore nella lettura del JSON: ${getErrorMessage(err, 'Sintassi non valida')}`,
     };
   }
 }

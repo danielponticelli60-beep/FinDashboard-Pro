@@ -37,7 +37,7 @@ export const CategoryExpenseChart: React.FC = () => {
     return data.reduce((acc, curr) => acc + curr.value, 0);
   }, [data]);
 
-  const onPieEnter = (_: any, index: number) => {
+  const onPieEnter = (_: unknown, index: number) => {
     setActiveIndex(index);
   };
 

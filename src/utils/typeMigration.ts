@@ -4,7 +4,7 @@ import { Transaction, TransactionType, TypeMigrationSummary, ToVerifyRow } from 
  * Deterministic parsing helper for evaluating the signed original amount.
  * NEVER reads or relies on cell color (red/green).
  */
-export function extractSignedAmount(val: any): {
+export function extractSignedAmount(val: unknown): {
   signedAmount: number | null;
   isAmbiguous: boolean;
   reason: string;

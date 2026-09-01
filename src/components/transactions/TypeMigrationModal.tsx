@@ -13,7 +13,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { useFinance } from '../../context/FinanceContext';
-import { formatCurrency, formatDateItalian, getTypeBadgeConfig } from '../../utils/formatters';
+import { formatCurrency, formatDateItalian, getTypeBadgeConfig, getErrorMessage } from '../../utils/formatters';
 import { TransactionType } from '../../types';
 
 export const TypeMigrationModal: React.FC = () => {
@@ -54,8 +54,8 @@ export const TypeMigrationModal: React.FC = () => {
       } else {
         setErrorMessage('Errore durante l’applicazione della migrazione.');
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Errore imprevisto.');
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err));
     }
   };
 

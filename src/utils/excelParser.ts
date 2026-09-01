@@ -57,7 +57,7 @@ export type RowValidationStatus = 'valid' | 'duplicate' | 'to_fix' | 'discarded'
 export interface ValidatedRowResult {
   rowNumber: number; // 1-based row number in sheet
   id: string; // Deterministic ID or preview ID
-  rawValues: any[];
+  rawValues: unknown[];
   trace: ConversionTrace;
   status: RowValidationStatus;
   statusReasons: string[];
@@ -71,7 +71,7 @@ export interface RawSheetInspection {
   availableSheets: string[];
   totalRows: number;
   totalCols: number;
-  rawGrid: any[][]; // 2D array of raw cell strings
+  rawGrid: unknown[][]; // 2D array of raw cell values from the worksheet
   headerRowIndex: number; // 0-based index in rawGrid (e.g. 0 for row 1)
   detectedHeaders: ColumnHeaderInfo[];
   distinctTypeValues: string[];
@@ -242,7 +242,7 @@ export const inspectRawWorksheet = (
   headerRowIndex = 0
 ): RawSheetInspection => {
   // Read worksheet as 2D raw array with defval: ''
-  const rawGrid: any[][] = XLSX.utils.sheet_to_json(worksheet, {
+  const rawGrid: unknown[][] = XLSX.utils.sheet_to_json(worksheet, {
     header: 1,
     defval: '',
     raw: false,
@@ -320,7 +320,7 @@ export const inspectRawWorksheet = (
 };
 
 // 2. Controlled Date Parsing
-export const parseItalianDateControlled = (val: any): { date: string | null; rule: string; error?: string } => {
+export const parseItalianDateControlled = (val: unknown): { date: string | null; rule: string; error?: string } => {
   if (val === null || val === undefined || String(val).trim() === '') {
     return { date: null, rule: 'Valore vuoto', error: 'Data assente' };
   }
@@ -384,7 +384,7 @@ export const parseItalianDateControlled = (val: any): { date: string | null; rul
 };
 
 // 3. Controlled Amount Parsing
-export const parseItalianAmountControlled = (val: any): { amount: number | null; isNegative: boolean; rule: string; error?: string } => {
+export const parseItalianAmountControlled = (val: unknown): { amount: number | null; isNegative: boolean; rule: string; error?: string } => {
   if (val === null || val === undefined || String(val).trim() === '') {
     return { amount: null, isNegative: false, rule: 'Valore vuoto', error: 'Importo assente' };
   }
@@ -444,7 +444,7 @@ export const parseItalianAmountControlled = (val: any): { amount: number | null;
 
 // 4. Controlled Type Parsing
 export const parseTransactionTypeControlled = (
-  rawType: any,
+  rawType: unknown,
   amountIsNegative: boolean,
   typeVariants: Record<string, 'income' | 'expense' | 'transfer'> = {}
 ): { type: TransactionType | null; rule: string; error?: string } => {
@@ -497,7 +497,7 @@ export interface CanonicalAccountResult {
 }
 
 export const normalizeCanonicalAccount = (
-  rawAccount: any,
+  rawAccount: unknown,
   assignEmptyToMainAccount = true
 ): CanonicalAccountResult => {
   if (rawAccount === null || rawAccount === undefined || String(rawAccount).trim() === '') {

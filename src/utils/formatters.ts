@@ -1,5 +1,13 @@
 import { Category, TransactionType } from '../types';
-import { getCategoryColor as getCatColorFromManager, BASE_CATEGORIES } from './categoryManager';
+import { BASE_CATEGORIES } from './categoryManager';
+
+export { getCategoryColor } from './categoryManager';
+
+export const getErrorMessage = (error: unknown, fallback = 'Errore imprevisto.'): string => {
+  if (error instanceof Error) return error.message || fallback;
+  if (typeof error === 'string') return error || fallback;
+  return fallback;
+};
 
 export const formatCurrency = (amount: number, includeDecimals = true): string => {
   const num = typeof amount === 'number' && !isNaN(amount) ? amount : 0;
@@ -60,10 +68,6 @@ export const QUARTERS_IT = [
 export const CATEGORY_COLORS: Record<string, string> = Object.fromEntries(
   BASE_CATEGORIES.map(c => [c.label, c.color])
 );
-
-export const getCategoryColor = (category: string): string => {
-  return getCatColorFromManager(category);
-};
 
 export const getAccountBadgeColor = (account: string): { bg: string; text: string; border: string } => {
   switch (account) {

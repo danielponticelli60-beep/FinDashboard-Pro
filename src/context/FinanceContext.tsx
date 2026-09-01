@@ -53,6 +53,14 @@ import {
   performIntegrityCheck as performIntegrityCheckUtil,
   LAST_BACKUP_STORAGE_KEY
 } from '../utils/backupManager';
+import { getErrorMessage } from '../utils/formatters';
+
+interface RestoreBackupDetails {
+  transactionsCount: number;
+  wealthCount: number;
+  goalsCount: number;
+  createdAt: string;
+}
 
 export interface WealthMetrics {
   totalLiquidity: number;
@@ -214,7 +222,7 @@ interface FinanceContextType {
   setLastBackupDate: (date: string | null) => void;
   exportFullBackupJSON: () => { filename: string; sizeBytes: number; backup: BackupData };
   importFullBackupJSON: (jsonString: string) => { success: boolean; message: string };
-  restoreFullBackup: (backup: BackupData) => { success: boolean; message: string; details?: any };
+  restoreFullBackup: (backup: BackupData) => { success: boolean; message: string; details?: RestoreBackupDetails };
   exportTransactionsCSV: () => { filename: string; rowCount: number };
   exportExcelWorkbook: () => { filename: string; sheetNames: string[] };
   performIntegrityCheck: () => IntegrityCheckResult;
@@ -1697,7 +1705,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     });
   };
 
-  const restoreFullBackup = (backup: BackupData): { success: boolean; message: string; details?: any } => {
+  const restoreFullBackup = (backup: BackupData): { success: boolean; message: string; details?: RestoreBackupDetails } => {
     try {
       if (!backup || !Array.isArray(backup.transactions)) {
         return { success: false, message: 'Dati di backup non validi: archivio transazioni assente.' };
@@ -1796,8 +1804,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           createdAt: backupDate,
         }
       };
-    } catch (e: any) {
-      return { success: false, message: `Errore durante il ripristino del backup: ${e.message}` };
+    } catch (e) {
+      return { success: false, message: `Errore durante il ripristino del backup: ${getErrorMessage(e)}` };
     }
   };
 
@@ -1805,8 +1813,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     try {
       const data: BackupData = JSON.parse(jsonString);
       return restoreFullBackup(data);
-    } catch (e: any) {
-      return { success: false, message: `Errore durante il parsing del JSON: ${e.message}` };
+    } catch (e) {
+      return { success: false, message: `Errore durante il parsing del JSON: ${getErrorMessage(e)}` };
     }
   };
 

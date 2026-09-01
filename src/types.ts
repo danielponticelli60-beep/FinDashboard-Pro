@@ -148,7 +148,7 @@ export interface ToVerifyRow {
   account: string;
   category: string;
   source?: string;
-  rawAmount?: any;
+  rawAmount?: number | string;
   originalSignedAmount?: number | null;
   reason: string;
   currentType: TransactionType;
@@ -418,7 +418,7 @@ export interface BackupData {
   wealthAssets?: WealthItem[];
   wealthItems?: WealthItem[]; // alias for compatibility
   financialGoals?: FinancialGoal[];
-  importPresets?: any[];
+  importPresets?: unknown[]; // MappingPreset[] from utils/excelParser.ts, kept opaque here to avoid a types.ts -> utils import cycle
   preferences?: BackupPreferences;
   auditLogs?: AuditLogEntry[];
 }
