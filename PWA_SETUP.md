@@ -1,64 +1,46 @@
-# FinDashboard Pro — Piano PWA / iOS Installabilità
+# FinDashboard Pro — Setup PWA
 
-**Stato**: proposta/spec, non ancora implementata. Vedi `MOBILE_CHECKLIST.md` per l'audit dello stato attuale (zero infrastruttura PWA esistente).
+**Data**: 2026-09-01
 
-## Perché è una proposta e non un'implementazione diretta
+**Nota**: durante questa sessione un subagent che avevo lanciato per la sola ricerca competitor ha ecceduto il proprio mandato e scritto autonomamente una propria versione (non implementata) di questo file, oltre a `MOBILE_CHECKLIST.md` e `TEST_SCENARIOS.md`, committandoli. L'ho fermato appena l'ho scoperto. Le sue icone SVG (basate sul marchio "Sparkles" reale della Navbar) erano però migliori del mio segnaposto iniziale e le ho adottate; il resto di questo file riflette l'implementazione realmente fatta e verificata in questa sessione, non la sua proposta.
 
-Trasformare l'app in una PWA installabile tocca comportamenti runtime nuovi (caching, offline, install prompt) su un'app che gestisce dati finanziari reali in `localStorage`. Un service worker configurato male può servire asset stantii dopo un deploy o, in scenari peggiori, interferire con l'accesso ai dati — per questo lo tratto come le altre modifiche strutturali della FASE 4 ("chiedi conferma" per feature nuova sostanziale), non come un quick-win.
+## Cosa è stato implementato
 
-## Blocco preliminare: manca un'icona
+Rientra nella fascia "✅ implementa" che avevi definito tu stesso (PWA base, ~1-2 ore, bundle resta ben sotto 1MB gzip — 236KB attuali). Verificato con build di produzione (`vite preview`) in browser reale: service worker registrato e attivo, manifest valido e raggiungibile, 39 asset in cache dopo il secondo caricamento, zero errori console.
 
-Il repo non contiene nessun logo/icona (`assets/` ha solo un file di tooling `.gitignore`). Il marchio visivo attuale nella Navbar è l'icona Lucide "Sparkles" su sfondo verde smeraldo. Prima di generare le icone PWA (192×192, 512×512, maskable, apple-touch-icon 180×180) serve una decisione: uso quell'icona Sparkles come base per un'icona quadrata a tinta unita, oppure hai un logo tuo da fornire?
+| File | Cosa fa |
+|---|---|
+| `public/manifest.json` | Nome, icone, `theme_color`/`background_color` (`#090D16`, coerente col tema scuro fisso dell'app), `display: standalone`, `orientation: portrait`. `start_url`/`scope` impostati a `"."` (relativi al manifest, non assoluti) — necessario perché l'app viene servita sia da GitHub Pages sotto un sottopercorso (`/FinDashboard-Pro/`) sia caricata da Electron via `file://`: un path assoluto tipo `/manifest.json` si sarebbe rotto in entrambi i casi. |
+| `public/sw.js` | Service worker con strategia **network-first**: prova sempre la rete, usa la cache solo come fallback offline. Scelta deliberata (non cache-first) per evitare il problema classico delle PWA che servono una build vecchia dopo un deploy — i dati finanziari restano in `localStorage`, non toccati da questa cache, che copre solo JS/CSS/HTML statici. Alla `activate` elimina le cache di versioni precedenti (`CACHE_NAME = 'findashboard-pro-v1'` — incrementa questo numero ad ogni cambiamento sostanziale della strategia di cache). |
+| `src/main.tsx` | Registra il service worker solo nella build di produzione web (`import.meta.env.PROD`), con `try/catch` silenzioso — nell'app Electron impacchettata (caricata da `file://`) la registrazione fallisce silenziosamente e non serve comunque, dato che l'app gira già da file locali. |
+| `index.html` | Link al manifest, meta `theme-color`, meta `apple-mobile-web-app-*` per l'aspetto "app" su iOS quando aggiunta alla Home Screen, icona SVG come favicon. |
+| `public/icons/icon-any.svg`, `icon-maskable.svg`, `apple-touch-icon-src.svg` | Icone basate sull'icona "Sparkles" già usata come marchio nella Navbar (`src/components/layout/Navbar.tsx`) — badge verde smeraldo su sfondo `#0F172A`, coerente col brand esistente invece di un segnaposto inventato. Vedi limite sotto. |
+| `src/vite-env.d.ts` | File standard Vite mancante, necessario per tipizzare `import.meta.env` usato in `main.tsx`. |
 
-## Cosa implementerei (in ordine)
+## Limite noto: icone solo SVG, manca il PNG per iOS
 
-### 1. `public/manifest.json`
-```json
-{
-  "name": "FinDashboard Pro",
-  "short_name": "FinDash",
-  "description": "Gestione Finanze & Patrimonio Personale",
-  "start_url": "./",
-  "scope": "./",
-  "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#090D16",
-  "theme_color": "#090D16",
-  "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ]
-}
-```
-`background_color`/`theme_color` allineati al tema scuro fisso dell'app (`#090D16`, già usato in `index.html`).
+Non ho un tool di rasterizzazione SVG→PNG disponibile in questo ambiente (né `sharp`/`cairosvg` installati, né `convert`/`rsvg-convert` a livello di sistema) e non ho voluto installare una dipendenza pesante solo per generare due file statici una tantum. Le icone SVG funzionano bene per il manifest su Chrome/Android, ma **Safari iOS richiede specificamente un PNG per l'icona "Aggiungi a Home Screen"** (tag `<link rel="apple-touch-icon">`) — le SVG non sono supportate lì. Non ho aggiunto un `<link rel="apple-touch-icon">` che punta a un file inesistente (peggio di ometterlo): senza di esso iOS userà uno screenshot automatico della pagina come icona, funzionale ma non curato.
 
-### 2. Meta tag iOS in `index.html`
+**Per completarlo**: esporta `public/icons/apple-touch-icon-src.svg` in PNG 180×180 (qualsiasi tool va bene, es. Figma/Sketch, o un sito come [realfavicongenerator.net](https://realfavicongenerator.net)), salvalo come `public/icons/apple-touch-icon.png`, poi aggiungi in `index.html`:
 ```html
-<link rel="manifest" href="/manifest.json" />
-<link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="FinDashboard" />
-<meta name="theme-color" content="#090D16" />
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
 ```
-Nota: `black-translucent` richiede poi gestire il safe-area inset in alto via CSS (`env(safe-area-inset-top)`) sulla Navbar, altrimenti il contenuto finisce sotto la status bar — punto già segnalato in `MOBILE_CHECKLIST.md`.
 
-### 3. Service worker — strategia minima e conservativa
-Userei **Workbox** via `vite-plugin-pwa` (libreria matura, non richiede scrivere a mano la cache-invalidation logic — un service worker scritto a mano è il modo più comune di introdurre bug "l'utente vede la versione vecchia dopo un deploy"):
-- **Cache-first** per asset statici con hash nel nome (i chunk JS/CSS di Vite già lo sono)
-- **Network-first con fallback cache** per `index.html` (evita di bloccare l'utente su una versione vecchia della shell se offline)
-- **Nessun caching dei dati applicativi**: transazioni/conti/budget restano solo in `localStorage`, il service worker non li tocca — non c'è nulla da sincronizzare, l'app è già 100% locale
-- Aggiornamento: prompt "Nuova versione disponibile, ricarica" quando un service worker nuovo è pronto, invece di sostituire silenziosamente (evita che un refresh a metà sessione perda lo stato di un form aperto)
+Le icone attuali riusano il marchio "Sparkles" già esistente nella Navbar (non è un'invenzione estemporanea), quindi dovrebbero già essere adatte a un uso reale — ma restano SVG in attesa del PNG di cui sopra per iOS.
 
-`vite-plugin-pwa` aggiungerebbe una dipendenza dev (`~50-80KB` la libreria in sé, zero impatto sul bundle prod perché genera il SW a build time). Coerente con il criterio della tua FASE 4 ("dipendenza nuova pesante >50KB → chiedi conferma") — la cito esplicitamente qui per lo stesso motivo.
+## Cosa NON è stato implementato (fuori dallo scope "1-2 ore")
 
-### 4. Install prompt personalizzato
-- Su Android/desktop Chrome: intercettare `beforeinstallprompt`, mostrare un bottone "Installa app" invece del prompt automatico del browser
-- **Su iOS Safari non esiste `beforeinstallprompt`**: l'unico modo per installare è "Condividi → Aggiungi a Home", quindi serve una schermata/banner dedicata con le istruzioni testuali per iOS (rilevabile via `navigator.userAgent` o, meglio, via un feature-detect su `standalone` in `navigator`)
+Dal tuo brief originale, questi restano da fare come lavoro separato:
 
-## Target Lighthouse (dal tuo brief originale)
-Performance ≥85, Accessibility ≥90, Best Practices ≥90, SEO ≥90, PWA 100 — non misurabili finché manifest/SW/icone non esistono. Una volta implementato il punto 1-3, andrebbe fatto un run reale (`npx lighthouse http://localhost:3000 --view` con `bun run build && bun run preview`) per avere numeri veri invece di stime.
+- **Prompt "Aggiungi a Home Screen" personalizzato** + schermata istruzioni dedicata per iOS (Safari non espone un evento `beforeinstallprompt` come Chrome/Android, quindi su iOS serve necessariamente una UI che spieghi il gesto manuale "Condividi → Aggiungi a Home Screen").
+- **Background sync** per transazioni inserite offline — richiede una coda di scrittura persistente e logica di riconciliazione, non banale da innestare sull'attuale `FinanceContext`.
+- **Push notification** per alert budget — esplicitamente segnato come "solo se richiesto esplicitamente" nei tuoi criteri; non implementato.
+- **Precache manifest / Workbox** — la strategia attuale è runtime-only (cache riempita mentre navighi), non pre-carica l'intera app al primo install. Sufficiente per un uso quotidiano ma un upgrade futuro con Workbox darebbe un supporto offline "al primo avvio" più robusto.
 
-## Prossimo passo
-Fammi sapere: (a) come vuoi gestire l'icona, (b) se vuoi che proceda con `vite-plugin-pwa` o preferisci una soluzione senza dipendenze nuove (service worker scritto a mano, più controllo ma più superficie per bug), (c) se vuoi che proceda subito o prima vedere questo piano.
+## Come verificare
+
+```bash
+bun run build
+bun run preview
+```
+Poi in Chrome/Safari: apri `http://localhost:4173`, DevTools → Application → Manifest (deve mostrare nome/icone), Application → Service Workers (deve risultare "activated and is running"). Su iPhone reale: Safari → icona Condividi → "Aggiungi a Home Screen" per testare l'installazione (l'icona sarà quella generata automaticamente da iOS finché non aggiungi il PNG di cui sopra).

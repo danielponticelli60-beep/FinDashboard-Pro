@@ -1,0 +1,26 @@
+{
+  "name": "FinDashboard Pro",
+  "short_name": "FinDash",
+  "description": "Dashboard professionale per la gestione delle finanze personali: movimenti, budget, patrimonio e obiettivi.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090D16",
+  "theme_color": "#090D16",
+  "lang": "it",
+  "icons": [
+    {
+      "src": "icons/icon-any.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
