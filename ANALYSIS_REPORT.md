@@ -48,7 +48,7 @@
 
 6. **`any` esplicito in 15 file** (~31 occorrenze), concentrato in `excelParser.ts`, `backupManager.ts`, `typeMigration.ts`, `categoryManager.ts` e nei modali che li consumano. Punti notevoli: `Transaction.rawAmount?: any`, `ToVerifyRow.rawAmount?: any`, `BackupData.importPresets?: any[]`, `restoreFullBackup(...): { details?: any }`, blocchi `catch (e: any)`.
 7. **`Category = string`** (types.ts:32) vaporizza gli union type `ExpenseCategory`/`IncomeCategory` già definiti: qualsiasi stringa è accettata dove il codice vorrebbe un tipo chiuso — perdita di type safety proprio dove servirebbe di più.
-8. **Doppia implementazione di `getCategoryColor`**: una in `formatters.ts` (lookup per nome categoria legacy, usata da 10 componenti) e una in `categoryManager.ts` (lookup per `categoryId` canonico contro il nuovo catalogo, usata solo da `TransactionModal`/`CategoryMigrationModal`). Sintomo di una migrazione legacy→canonico non ancora completata: stesso concetto, due fonti di verità, colori potenzialmente diversi tra viste per la stessa categoria.
+8. ~~Doppia implementazione di `getCategoryColor`~~ **[Corretto in analisi]** — verificando il codice, `formatters.ts` non aveva una logica propria: era già un semplice wrapper che delegava a `categoryManager.ts` (stesso algoritmo, stesso fallback deterministico per categorie custom). Non è un bug di colori divergenti, solo un'indirection ridondante — risolta rendendolo un re-export diretto (vedi §5).
 9. **Zero attributi `aria-*` in tutti i 31 componenti**: nessuna base di accessibilità (niente `aria-label` su bottoni icon-only, niente gestione focus nei modali).
 10. **File Electron duplicato**: `main.cjs` in root e `electron/main.cjs` sono divergenti (quello in root è una versione più vecchia senza dialog di errore e diagnostica); `package.json` punta solo a `electron/main.cjs`, quindi quello in root è probabilmente morto/dimenticato.
 
@@ -73,10 +73,28 @@ Lo stato coperto (con relativo `useState` + persistenza `localStorage` manuale) 
 
 Il pattern ripetuto ~15 volte (`useState(() => { leggi da localStorage }) + useEffect(persisti su localStorage)`) è un ottimo candidato per un hook riutilizzabile `usePersistedState<T>(key, initial)`, che da solo eliminerebbe gran parte della duplicazione prima ancora di spezzare il context.
 
-## 4. Cosa NON ho toccato e perché
+## 4. FASE 2 — Quick-win applicati (2026-09-01)
 
-Non ho ancora modificato il codice applicativo. Ho solo:
-- inizializzato git e creato un commit baseline reversibile (`ad39f04`)
-- eseguito `tsc --noEmit` e `vite build` (nessuna modifica, solo verifica)
+Su tua indicazione ho implementato solo i miglioramenti a rischio zero, verificabili con `tsc --noEmit` + `vite build` dopo ogni passo (mai rotti durante la sessione), lasciando invariati flag Electron e split del context. Commit atomici:
 
-Secondo i criteri di autonomia che tu stesso hai definito nella FASE 4 ("⚠️ Chiedi conferma se: refactoring architetturale major, cambiamento breaking"), lo split di `FinanceContext.tsx` in più context, l'attivazione di `strict` mode (potenzialmente decine di errori a cascata su 17k LOC) e l'eventuale rimozione di `webSecurity: false` rientrano in quella categoria — per questo mi fermo qui prima di procedere e ti propongo come priorizzare la FASE 2.
+| Commit | Cosa |
+|---|---|
+| `807f175` | Rimosse `@google/genai`, `express`, `dotenv` (mai importate, zero chiamate di rete nell'app), deduplicato `vite`. **Aggiunto `@types/react`/`@types/react-dom`, che mancavano del tutto** — senza di essi `tsc` trattava silenziosamente l'intera superficie React (hook, `FC`, `Component`, JSX) come non tipata: lo `tsc --noEmit` pulito riportato in §1 non stava in realtà verificando gran parte del codice. Aggiunti i types, **0 nuovi errori** — la base di codice era già corretta contro i tipi reali. |
+| `408a50d` | Code-splitting con `React.lazy`+`Suspense` per le 9 view e gli 8 modali sempre montati in `App.tsx`. Bundle singolo da 1.52 MB → 739 KB (420 KB → 236 KB gzip), con chunk per-view/modale caricati on-demand. Aggiunto `ErrorBoundary` (nuovo `src/components/common/ErrorBoundary.tsx`) attorno all'area principale e al cluster modali: un errore di rendering non fa più crashare tutta la dashboard. |
+| `24ce2eb` | Eliminati tutti i 31 `any` espliciti in 15 file: `catch (e: any)` → `catch (e)` con un helper condiviso `getErrorMessage()`; i parser di celle Excel grezze (`excelParser.ts`, `typeMigration.ts`) tipizzati `unknown` (facevano già narrowing interno via `typeof`/`instanceof`); `Transaction.rawAmount`/`ToVerifyRow.rawAmount` → `number \| string`; `restoreFullBackup` ha ora un tipo di ritorno reale (`RestoreBackupDetails`) invece di `details?: any`; i 4 cast `as any` su `onChange` di `<select>` sostituiti con l'union type reale (`GoalCategory`, `WealthType`, `FinancialGoal['priority']`). |
+| `710836f` | Rimosso `main.cjs` in root (copia obsoleta e divergente di `electron/main.cjs`, non referenziata in `package.json`). Ripristinato `.github/workflows/deploy.yml` (esisteva solo su GitHub, mancava nella copia locale più recente). |
+
+**React.memo non è stato applicato**: 28 dei 31 componenti chiamano `useFinance()` direttamente senza ricevere props, quindi `React.memo` non avrebbe alcun effetto sui loro re-render — servirebbe prima lo split del context (non incluso in questa passata, vedi §5).
+
+Verificato anche manualmente in browser (dev server + navigazione Dashboard → Movimenti → Conti → Patrimonio → apertura modali Backup ed Excel): nessun errore console, tutti i chunk lazy si caricano correttamente.
+
+## 5. Cosa resta aperto (non toccato in questa passata)
+
+Restano deliberatamente intatti, perché rientrano nei criteri di "chiedi conferma" che tu stesso hai definito per la FASE 4 (refactoring architetturale major, cambiamento breaking):
+
+- **`webSecurity: false`** in `electron/main.cjs` — non verificato/rimosso su tua indicazione esplicita.
+- **Split di `FinanceContext.tsx`** in context modulari — proposto ma non incluso in questo giro di quick-win.
+- **`strict` mode** in `tsconfig.json` — non ancora attivato (potenzialmente decine di errori a cascata su 17k LOC, da valutare a parte).
+- **Accessibilità (`aria-*`)**, **virtualizzazione liste lunghe**, **test automatici** — non affrontati in questa sessione.
+
+Tutto il resto della FASE 2.1 (any/type safety) e parte della 2.2/2.3 (code-splitting, error boundary) è stato completato — vedi §4. `tsc --noEmit` e `vite build` sono verdi ad ogni commit.
