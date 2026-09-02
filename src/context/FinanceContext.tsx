@@ -53,6 +53,7 @@ import {
 } from '../utils/backupManager';
 import { getErrorMessage } from '../utils/formatters';
 import { migrateBackupToV2 } from '../utils/schemaMigration';
+import { mergeDuplicateCategory } from '../utils/categoryMerge';
 import { AccountSummary, AggregateSummary, computeAggregateSummary, computeAllAccountSummaries } from '../utils/accountSummary';
 import { validateAddAccount, validateDeleteAccount } from '../utils/accountRules';
 
@@ -688,6 +689,36 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   const clearAuditLog = () => {
     setAuditLog([]);
   };
+
+  // One-time startup migration: merges the legacy duplicate category
+  // 'svago_e_ristoranti' into the canonical 'ristoranti_e_svago' (see
+  // CATEGORY_MERGE_REPORT.md). Idempotent - after the first run no
+  // transaction can match any more, so this is a no-op on every subsequent
+  // load. hasRunCategoryMergeRef guards against a duplicate audit-log entry
+  // from React StrictMode's double-invoke in dev.
+  //
+  // Deliberately NOT computed inside a setTransactions(prev => ...) updater:
+  // React (StrictMode especially) may invoke an updater function more than
+  // once, which would call the addAuditEntry side effect twice - confirmed
+  // live (duplicate audit-log entries) before this was fixed. Read
+  // `transactions` from the outer closure instead, since this effect is
+  // designed to run exactly once at mount with whatever was just loaded.
+  const hasRunCategoryMergeRef = React.useRef(false);
+  useEffect(() => {
+    if (hasRunCategoryMergeRef.current) return;
+    hasRunCategoryMergeRef.current = true;
+    const { updatedTransactions, report } = mergeDuplicateCategory(transactions, 'svago_e_ristoranti', 'Svago e ristoranti', 'ristoranti_e_svago');
+    if (report.transactionsReclassified > 0) {
+      setTransactions(updatedTransactions);
+      addAuditEntry(
+        'migration',
+        `Unificate le categorie duplicate: ${report.transactionsReclassified} movimenti riclassificati da "Svago e ristoranti" a "${report.canonicalLabel}"`,
+        report.transactionsReclassified,
+        report.transactionIds
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync to LocalStorage
   useEffect(() => {
