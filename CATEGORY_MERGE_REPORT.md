@@ -1,7 +1,21 @@
-# Report Preliminare — Unificazione categorie "Ristoranti & Svago" / "Svago e ristoranti"
+# Report — Unificazione categorie "Ristoranti & Svago" / "Svago e ristoranti"
 
 **Data**: 2026-09-02
-**Stato**: solo analisi. Nessuna modifica al codice o ai dati. In attesa della tua decisione su un punto di ambiguità (vedi §4) prima di procedere alla FASE 2.
+**Stato finale**: ✅ completato. Migrazione implementata, testata (38/38 test), verificata su backup reale e in browser, collegata come passo automatico all'avvio dell'app. Rollback: `git revert` sui commit elencati in fondo, oppure ripristina un backup pre-migrazione.
+
+## Risultato finale
+
+- Hai scelto **Opzione A**: `rawCategory` viene sovrascritto al valore canonico anche sulle transazioni migrate (non solo `categoryId`/`category`/`categoryLabel`).
+- **15 transazioni reali** (dal tuo backup) riclassificate da `svago_e_ristoranti` a `ristoranti_e_svago`.
+- `svago_e_ristoranti` rimosso da `BASE_CATEGORIES` in `categoryManager.ts`.
+- Migrazione collegata come passo automatico all'avvio di `FinanceContext` (idempotente, verificata anche con reload multipli in browser reale — la seconda volta riclassifica 0 record).
+
+### Due problemi reali trovati e corretti durante la verifica in browser (non solo teorici)
+
+1. **Rischio di ricomparsa non solo teorico**: durante il test dal vivo ho trovato 3 transazioni con `categoryId` **già corretto** (`ristoranti_e_svago`) ma con `rawCategory` ancora `"Svago e ristoranti"` (residuo del sistema di migrazione categorie già esistente nell'app, che preserva `rawCategory` di proposito). Questo da solo bastava a far ricomparire la categoria duplicata tramite `buildFullCategoryCatalog`, che ricostruisce le categorie "personalizzate" leggendo `rawCategory` per primo — indipendentemente da `categoryId`. **Corretto**: la funzione di merge ora controlla anche `category`/`categoryLabel`/`rawCategory` uguali all'etichetta duplicata, non solo `categoryId`. Aggiunto test di regressione dedicato.
+2. **Audit log duplicato**: la prima versione registrava due volte la stessa migrazione ad ogni avvio (causa: un effetto collaterale — `addAuditEntry` — dentro una funzione di aggiornamento `setTransactions(prev => ...)`, che React può invocare più volte). **Corretto**: la logica è stata spostata fuori dall'updater. Verificato: un solo record di audit log per avvio, anche con reload ripetuti.
+
+Questi due problemi non erano nell'analisi preliminare — sono emersi solo durante la verifica pratica in browser (FASE 7), a conferma dell'utilità di quel passaggio.
 
 ## Sintesi richiesta dal template
 
