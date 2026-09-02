@@ -14,10 +14,8 @@ import {
   ExpenseCategory,
   IncomeCategory,
   MainAccountConfig,
-  MainAccountSummary,
   PrepaidCardConfig,
-  PrepaidAccountSummary,
-  OverallLiquiditySummary,
+  Account,
   ImportBatch,
   AuditLogEntry,
   DiagnosticReport,
@@ -54,6 +52,9 @@ import {
   LAST_BACKUP_STORAGE_KEY
 } from '../utils/backupManager';
 import { getErrorMessage } from '../utils/formatters';
+import { migrateBackupToV2 } from '../utils/schemaMigration';
+import { AccountSummary, AggregateSummary, computeAggregateSummary, computeAllAccountSummaries } from '../utils/accountSummary';
+import { validateAddAccount, validateDeleteAccount } from '../utils/accountRules';
 
 interface RestoreBackupDetails {
   transactionsCount: number;
@@ -101,6 +102,7 @@ interface FinanceContextType {
   addTransaction: (tx: Omit<Transaction, 'id'>) => void;
   updateTransaction: (id: string, updatedTx: Partial<Transaction>) => void;
   updateTransactionType: (id: string, newType: TransactionType) => void;
+  completeIncompleteTransfer: (id: string, fromAccountId: string, toAccountId: string) => { success: boolean; message: string };
   deleteTransaction: (id: string) => void;
   deleteTransactionsBulk: (ids: string[]) => { deletedCount: number };
   duplicateTransaction: (id: string) => void;
@@ -131,19 +133,31 @@ interface FinanceContextType {
   openCategoryMigrationModal: () => void;
   closeCategoryMigrationModal: () => void;
 
-  // Conto Principale State & Management
+  // Generic Account[] model (schema v2, 2-4 accounts) — see utils/accountRules.ts, utils/accountSummary.ts
+  accounts: Account[];
+  accountSummaries: Record<string, AccountSummary>;
+  aggregateSummary: AggregateSummary;
+  addAccount: (input: Omit<Account, 'id' | 'isConfigured'> & { id?: string }) => { success: boolean; message: string; accountId?: string };
+  updateAccount: (id: string, partial: Partial<Account>) => void;
+  deleteAccount: (id: string) => { success: boolean; message: string };
+  createTransfer: (params: { fromAccountId: string; toAccountId: string; amount: number; date: string; description?: string }) => { success: boolean; message: string };
+  isAddAccountModalOpen: boolean;
+  openAddAccountModal: () => void;
+  closeAddAccountModal: () => void;
+  isTransferModalOpen: boolean;
+  openTransferModal: () => void;
+  closeTransferModal: () => void;
+
+  // Conto Principale State & Management (backward-compat view derived from `accounts` — see accountToMainConfig)
   mainAccountConfig: MainAccountConfig;
   updateMainAccountConfig: (newConfig: Partial<MainAccountConfig>) => void;
-  mainAccountSummary: MainAccountSummary;
   isAccountConfigModalOpen: boolean;
   openAccountConfigModal: () => void;
   closeAccountConfigModal: () => void;
 
-  // Carta Prepagata State & Management
+  // Carta Prepagata State & Management (backward-compat view derived from `accounts` — see accountToPrepaidConfig)
   prepaidCardConfig: PrepaidCardConfig;
   updatePrepaidCardConfig: (newConfig: Partial<PrepaidCardConfig>) => void;
-  prepaidAccountSummary: PrepaidAccountSummary;
-  overallLiquiditySummary: OverallLiquiditySummary;
   isPrepaidConfigModalOpen: boolean;
   openPrepaidConfigModal: () => void;
   closePrepaidConfigModal: () => void;
@@ -262,6 +276,62 @@ const DEFAULT_PREPAID_CARD_CONFIG: PrepaidCardConfig = {
   isConfigured: true,
 };
 
+// Backward-compat views: MainAccountConfig/PrepaidCardConfig used AccountLabel
+// where the generic Account model uses `label`, so these bridge the two
+// shapes for the handful of components (AccountConfigModal, SettingsView,
+// ExcelImportModal) that still read the old fixed-account fields.
+const accountToMainConfig = (acc: Account | undefined): MainAccountConfig => {
+  if (!acc) return DEFAULT_MAIN_ACCOUNT_CONFIG;
+  return {
+    id: acc.id,
+    initialBalance: acc.initialBalance,
+    initialDate: acc.initialDate,
+    accountLabel: acc.label,
+    maskedNumber: acc.maskedNumber,
+    isConfigured: acc.isConfigured,
+    controlBalance: acc.controlBalance,
+    controlBalanceDate: acc.controlBalanceDate,
+    cardDebitMode: acc.cardDebitMode,
+    linkedMethods: acc.linkedMethods,
+  };
+};
+
+const accountToPrepaidConfig = (acc: Account | undefined): PrepaidCardConfig => {
+  if (!acc) return DEFAULT_PREPAID_CARD_CONFIG;
+  return {
+    id: acc.id,
+    initialBalance: acc.initialBalance,
+    initialDate: acc.initialDate,
+    accountLabel: acc.label,
+    maskedNumber: acc.maskedNumber,
+    isConfigured: acc.isConfigured,
+    controlBalance: acc.controlBalance,
+    controlBalanceDate: acc.controlBalanceDate,
+  };
+};
+
+const accountFromMainConfigDefault = (): Account => ({
+  id: 'main_account',
+  kind: 'checking',
+  label: DEFAULT_MAIN_ACCOUNT_CONFIG.accountLabel!,
+  initialBalance: DEFAULT_MAIN_ACCOUNT_CONFIG.initialBalance,
+  initialDate: DEFAULT_MAIN_ACCOUNT_CONFIG.initialDate,
+  maskedNumber: DEFAULT_MAIN_ACCOUNT_CONFIG.maskedNumber,
+  isConfigured: true,
+  cardDebitMode: DEFAULT_MAIN_ACCOUNT_CONFIG.cardDebitMode,
+  linkedMethods: DEFAULT_MAIN_ACCOUNT_CONFIG.linkedMethods,
+});
+
+const accountFromPrepaidConfigDefault = (): Account => ({
+  id: 'prepaid_card',
+  kind: 'prepaid_card',
+  label: DEFAULT_PREPAID_CARD_CONFIG.accountLabel,
+  initialBalance: DEFAULT_PREPAID_CARD_CONFIG.initialBalance,
+  initialDate: DEFAULT_PREPAID_CARD_CONFIG.initialDate,
+  maskedNumber: DEFAULT_PREPAID_CARD_CONFIG.maskedNumber,
+  isConfigured: true,
+});
+
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_TX_KEY = 'findashboard_transactions_v1';
@@ -271,6 +341,7 @@ const LOCAL_STORAGE_GOALS_KEY = 'findashboard_goals_v1';
 const LOCAL_STORAGE_HISTORY_KEY = 'findashboard_history_v1';
 const LOCAL_STORAGE_MAIN_ACC_KEY = 'findashboard_main_acc_v1';
 const LOCAL_STORAGE_PREPAID_KEY = 'findashboard_prepaid_card_v1';
+const LOCAL_STORAGE_ACCOUNTS_KEY = 'findashboard_accounts_v2';
 const LOCAL_STORAGE_LAST_BATCH_KEY = 'findashboard_last_batch_v1';
 const LOCAL_STORAGE_AUDIT_LOG_KEY = 'findashboard_audit_log_v1';
 const LOCAL_STORAGE_IMPORT_SESSIONS_KEY = 'findashboard_import_sessions_v1';
@@ -424,55 +495,78 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     return [];
   });
 
-  // Load Conto Principale config
-  const [mainAccountConfig, setMainAccountConfig] = useState<MainAccountConfig>(() => {
+  // Load accounts (schema v2). If the new key isn't there yet, migrate once
+  // from the old fixed main/prepaid keys (same defaulting logic as before,
+  // preserved verbatim) - the persistence effect below then writes the v2
+  // key so this migration path only runs once per browser profile.
+  const [accounts, setAccounts] = useState<Account[]>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_MAIN_ACC_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
+      const savedAccounts = localStorage.getItem(LOCAL_STORAGE_ACCOUNTS_KEY);
+      if (savedAccounts) {
+        const parsed = JSON.parse(savedAccounts);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load accounts', e);
+    }
+
+    // One-time migration from the old fixed main/prepaid keys.
+    const migrated: Account[] = [];
+    try {
+      const savedMain = localStorage.getItem(LOCAL_STORAGE_MAIN_ACC_KEY);
+      if (savedMain) {
+        const parsed = JSON.parse(savedMain);
         const migratedInitialBalance = typeof parsed.initialBalance === 'number' && parsed.initialDate === '2026-08-16' && parsed.initialBalance > 0
           ? parsed.initialBalance
           : (parsed.controlBalance !== undefined ? parsed.controlBalance : 3075.00);
-        return {
+        migrated.push({
           id: 'main_account',
+          kind: 'checking',
           initialBalance: migratedInitialBalance,
           initialDate: '2026-08-16',
-          accountLabel: parsed.accountLabel || 'Conto Corrente Principale',
+          label: parsed.accountLabel || 'Conto Corrente Principale',
           maskedNumber: parsed.maskedNumber || '••••4829',
           isConfigured: true,
           cardDebitMode: 'separate_account',
           linkedMethods: ['Carta prepagata'],
-        };
+        });
+      } else {
+        migrated.push(accountFromMainConfigDefault());
       }
     } catch (e) {
-      console.error('Failed to load main account config', e);
+      console.error('Failed to migrate main account config', e);
+      migrated.push(accountFromMainConfigDefault());
     }
-    return DEFAULT_MAIN_ACCOUNT_CONFIG;
-  });
 
-  // Load Carta Prepagata config
-  const [prepaidCardConfig, setPrepaidCardConfig] = useState<PrepaidCardConfig>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_PREPAID_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
+      const savedPrepaid = localStorage.getItem(LOCAL_STORAGE_PREPAID_KEY);
+      if (savedPrepaid) {
+        const parsed = JSON.parse(savedPrepaid);
         const migratedInitialBalance = typeof parsed.initialBalance === 'number' && parsed.initialDate === '2026-08-16'
           ? parsed.initialBalance
           : (parsed.controlBalance !== undefined ? parsed.controlBalance : 54.68);
-        return {
+        migrated.push({
           id: 'prepaid_card',
+          kind: 'prepaid_card',
           initialBalance: migratedInitialBalance,
           initialDate: parsed.initialDate === '2026-08-16' ? parsed.initialDate : '2026-08-16',
-          accountLabel: parsed.accountLabel || 'Carta prepagata',
+          label: parsed.accountLabel || 'Carta prepagata',
           maskedNumber: parsed.maskedNumber || '••••1942',
           isConfigured: true,
-        };
+        });
+      } else {
+        migrated.push(accountFromPrepaidConfigDefault());
       }
     } catch (e) {
-      console.error('Failed to load prepaid card config', e);
+      console.error('Failed to migrate prepaid card config', e);
+      migrated.push(accountFromPrepaidConfigDefault());
     }
-    return DEFAULT_PREPAID_CARD_CONFIG;
+
+    return migrated;
   });
+
+  const mainAccountConfig = useMemo(() => accountToMainConfig(accounts.find(a => a.id === 'main_account')), [accounts]);
+  const prepaidCardConfig = useMemo(() => accountToPrepaidConfig(accounts.find(a => a.id === 'prepaid_card')), [accounts]);
 
   // Last imported batch tracking for undo
   const [lastImportBatch, setLastImportBatch] = useState<ImportBatch | null>(() => {
@@ -559,6 +653,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isAccountConfigModalOpen, setIsAccountConfigModalOpen] = useState(false);
   const [isPrepaidConfigModalOpen, setIsPrepaidConfigModalOpen] = useState(false);
+  const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState(false);
   const [isResetPersonalModalOpen, setIsResetPersonalModalOpen] = useState(false);
   const [isCategoryMigrationModalOpen, setIsCategoryMigrationModalOpen] = useState(false);
@@ -604,11 +700,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   useEffect(() => {
     try {
-      localStorage.setItem(LOCAL_STORAGE_MAIN_ACC_KEY, JSON.stringify(mainAccountConfig));
+      localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(accounts));
     } catch (e) {
-      console.error('Failed to save main account config', e);
+      console.error('Failed to save accounts', e);
     }
-  }, [mainAccountConfig]);
+  }, [accounts]);
 
   useEffect(() => {
     try {
@@ -670,40 +766,99 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   }, [financialGoals]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_PREPAID_KEY, JSON.stringify(prepaidCardConfig));
-    } catch (e) {
-      console.error('Failed to save prepaid card config', e);
-    }
-  }, [prepaidCardConfig]);
-
-  // Conto Principale Config Updater
-  const updateMainAccountConfig = (newConfig: Partial<MainAccountConfig>) => {
-    setMainAccountConfig(prev => {
-      const updated = { ...prev, ...newConfig, isConfigured: true };
-      try {
-        localStorage.setItem(LOCAL_STORAGE_MAIN_ACC_KEY, JSON.stringify(updated));
-      } catch (e) {
-        console.error('Failed to sync main account config', e);
-      }
-      addAuditEntry('update', `Aggiornata configurazione Conto Principale (Saldo iniziale: € ${updated.initialBalance}, Data: ${updated.initialDate}, Saldo Controllo: € ${updated.controlBalance ?? 3075.00})`);
-      return updated;
-    });
+  // Generic Account[] CRUD (schema v2)
+  const updateAccount = (id: string, partial: Partial<Account>) => {
+    setAccounts(prev => prev.map(a => (a.id === id ? { ...a, ...partial } : a)));
+    addAuditEntry('update', `Aggiornata configurazione conto "${accounts.find(a => a.id === id)?.label || id}"`);
   };
 
-  // Carta Prepagata Config Updater
-  const updatePrepaidCardConfig = (newConfig: Partial<PrepaidCardConfig>) => {
-    setPrepaidCardConfig(prev => {
-      const updated = { ...prev, ...newConfig, isConfigured: true };
-      try {
-        localStorage.setItem(LOCAL_STORAGE_PREPAID_KEY, JSON.stringify(updated));
-      } catch (e) {
-        console.error('Failed to sync prepaid card config', e);
-      }
-      addAuditEntry('update', `Aggiornata configurazione Carta Prepagata (Saldo iniziale: € ${updated.initialBalance}, Data: ${updated.initialDate}, Saldo Controllo: € ${updated.controlBalance ?? 54.68})`);
-      return updated;
+  const addAccount = (input: Omit<Account, 'id' | 'isConfigured'> & { id?: string }): { success: boolean; message: string; accountId?: string } => {
+    const validation = validateAddAccount(accounts);
+    if (!validation.valid) {
+      return { success: false, message: validation.reason! };
+    }
+    const id = input.id || `acc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    if (accounts.some(a => a.id === id)) {
+      return { success: false, message: 'Esiste già un conto con questo identificativo.' };
+    }
+    const newAccount: Account = { ...input, id, isConfigured: true };
+    setAccounts(prev => [...prev, newAccount]);
+    addAuditEntry('create', `Aggiunto nuovo conto "${newAccount.label}" (${newAccount.kind})`);
+    return { success: true, message: 'Conto aggiunto con successo.', accountId: id };
+  };
+
+  const deleteAccount = (id: string): { success: boolean; message: string } => {
+    const validation = validateDeleteAccount(accounts, id);
+    if (!validation.valid) {
+      return { success: false, message: validation.reason! };
+    }
+    const target = accounts.find(a => a.id === id);
+    setAccounts(prev => prev.filter(a => a.id !== id));
+    addAuditEntry('delete', `Eliminato conto "${target?.label || id}". Le transazioni storiche restano invariate e mostrano il conto come non configurato.`);
+    return { success: true, message: 'Conto eliminato.' };
+  };
+
+  const createTransfer = (params: { fromAccountId: string; toAccountId: string; amount: number; date: string; description?: string }): { success: boolean; message: string } => {
+    const { fromAccountId, toAccountId, amount, date, description } = params;
+    if (fromAccountId === toAccountId) {
+      return { success: false, message: 'Il conto di origine e destinazione devono essere diversi.' };
+    }
+    if (!accounts.some(a => a.id === fromAccountId) || !accounts.some(a => a.id === toAccountId)) {
+      return { success: false, message: 'Conto di origine o destinazione non valido.' };
+    }
+    if (!(amount > 0)) {
+      return { success: false, message: 'Inserisci un importo di trasferimento maggiore di zero.' };
+    }
+    const fromAccount = accounts.find(a => a.id === fromAccountId)!;
+    addTransaction({
+      date,
+      description: description?.trim() || `Trasferimento a ${accounts.find(a => a.id === toAccountId)?.label || toAccountId}`,
+      amount,
+      type: 'transfer',
+      category: 'Giroconto / Trasferimento',
+      categoryId: 'giroconto_trasferimento',
+      categoryLabel: 'Giroconto / Trasferimento',
+      accountId: fromAccountId,
+      account: fromAccount.label as Transaction['account'],
+      accountLabel: fromAccount.label,
+      fromAccountId,
+      toAccountId,
+      status: 'completed',
     });
+    return { success: true, message: 'Trasferimento registrato con successo.' };
+  };
+
+  const openAddAccountModal = () => setIsAddAccountModalOpen(true);
+  const closeAddAccountModal = () => setIsAddAccountModalOpen(false);
+  const openTransferModal = () => setIsTransferModalOpen(true);
+  const closeTransferModal = () => setIsTransferModalOpen(false);
+
+  // Conto Principale Config Updater (backward-compat wrapper over updateAccount)
+  const updateMainAccountConfig = (newConfig: Partial<MainAccountConfig>) => {
+    const partial: Partial<Account> = {};
+    if (newConfig.initialBalance !== undefined) partial.initialBalance = newConfig.initialBalance;
+    if (newConfig.initialDate !== undefined) partial.initialDate = newConfig.initialDate;
+    if (newConfig.accountLabel !== undefined) partial.label = newConfig.accountLabel;
+    if (newConfig.maskedNumber !== undefined) partial.maskedNumber = newConfig.maskedNumber;
+    if (newConfig.controlBalance !== undefined) partial.controlBalance = newConfig.controlBalance;
+    if (newConfig.controlBalanceDate !== undefined) partial.controlBalanceDate = newConfig.controlBalanceDate;
+    if (newConfig.cardDebitMode !== undefined) partial.cardDebitMode = newConfig.cardDebitMode;
+    if (newConfig.linkedMethods !== undefined) partial.linkedMethods = newConfig.linkedMethods;
+    partial.isConfigured = true;
+    updateAccount('main_account', partial);
+  };
+
+  // Carta Prepagata Config Updater (backward-compat wrapper over updateAccount)
+  const updatePrepaidCardConfig = (newConfig: Partial<PrepaidCardConfig>) => {
+    const partial: Partial<Account> = {};
+    if (newConfig.initialBalance !== undefined) partial.initialBalance = newConfig.initialBalance;
+    if (newConfig.initialDate !== undefined) partial.initialDate = newConfig.initialDate;
+    if (newConfig.accountLabel !== undefined) partial.label = newConfig.accountLabel;
+    if (newConfig.maskedNumber !== undefined) partial.maskedNumber = newConfig.maskedNumber;
+    if (newConfig.controlBalance !== undefined) partial.controlBalance = newConfig.controlBalance;
+    if (newConfig.controlBalanceDate !== undefined) partial.controlBalanceDate = newConfig.controlBalanceDate;
+    partial.isConfigured = true;
+    updateAccount('prepaid_card', partial);
   };
 
   const openPrepaidConfigModal = () => setIsPrepaidConfigModalOpen(true);
@@ -732,6 +887,31 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       return updated;
     });
     setLastMigrationSnapshot(null); // Invalidates migration undo upon new modifications
+  };
+
+  // Resolves a transferAccountsIncomplete transaction (see schemaMigration.ts)
+  // once the user manually picks the correct source/destination accounts -
+  // never inferred automatically.
+  const completeIncompleteTransfer = (id: string, fromAccountId: string, toAccountId: string): { success: boolean; message: string } => {
+    if (fromAccountId === toAccountId) {
+      return { success: false, message: 'Il conto di origine e destinazione devono essere diversi.' };
+    }
+    if (!accounts.some(a => a.id === fromAccountId) || !accounts.some(a => a.id === toAccountId)) {
+      return { success: false, message: 'Conto di origine o destinazione non valido.' };
+    }
+    const target = transactions.find(t => t.id === id);
+    if (!target || target.type !== 'transfer') {
+      return { success: false, message: 'Transazione non trovata o non è un trasferimento.' };
+    }
+    setTransactions(prev => prev.map(tx => tx.id === id ? {
+      ...tx,
+      accountId: fromAccountId,
+      fromAccountId,
+      toAccountId,
+      transferAccountsIncomplete: false,
+    } : tx));
+    addAuditEntry('update', `Completato trasferimento incompleto "${target.description}" (€ ${target.amount.toFixed(2)}): ${accounts.find(a => a.id === fromAccountId)?.label} → ${accounts.find(a => a.id === toAccountId)?.label}`, 1, [id]);
+    return { success: true, message: 'Trasferimento completato.' };
   };
 
   const updateTransactionType = (id: string, newType: TransactionType) => {
@@ -1202,298 +1382,15 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     };
   }, [filteredTransactions]);
 
-  // Conto Principale Real-Time Automated Balance Engine (starts from openingBalance € 3.075,00 at initialDate 2026-08-16)
-  const mainAccountSummary = useMemo<MainAccountSummary>(() => {
-    const { 
-      initialBalance = 3075.00, 
-      initialDate = '2026-08-16', 
-      cardDebitMode = 'separate_account',
-    } = mainAccountConfig;
+  const accountSummaries = useMemo<Record<string, AccountSummary>>(
+    () => computeAllAccountSummaries(accounts, transactions),
+    [accounts, transactions]
+  );
 
-    const isCardLinked = cardDebitMode === 'direct_debit';
-
-    // Helper to check if a transaction belongs to the Conto Principale domain
-    const isTxLinkedToMainAccount = (tx: Transaction): boolean => {
-      if (tx.accountId === 'main_account') return true;
-      const clean = (tx.account || '').trim().toLowerCase();
-      if (clean === 'conto principale' || clean === 'conto' || clean === 'conto corrente' || clean === 'main') return true;
-      if (isCardLinked && (tx.accountId === 'prepaid_card' || clean === 'carta' || clean === 'carta prepagata' || clean === 'carta di credito' || clean.includes('carta'))) {
-        return true;
-      }
-      return false;
-    };
-
-    // ONLY consider transactions strictly AFTER initialDate ('2026-08-16')
-    const relevantTxs = transactions
-      .filter(tx => tx.date > initialDate && (isTxLinkedToMainAccount(tx) || tx.fromAccountId === 'main_account' || tx.toAccountId === 'main_account'))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    let totalIncome = 0;
-    let incomeCount = 0;
-
-    let expenseDirectAmount = 0;
-    let expenseDirectCount = 0;
-    let expenseCardAmount = 0;
-    let expenseCardCount = 0;
-
-    let transfersIn = 0;
-    let transfersOut = 0;
-    let transfersCount = 0;
-
-    let rollingBalance = initialBalance;
-    const runningHistory: { date: string; description: string; amount: number; type: TransactionType; balance: number; account: string }[] = [
-      {
-        date: initialDate,
-        description: 'Saldo operativo di apertura',
-        amount: initialBalance,
-        type: 'income',
-        balance: initialBalance,
-        account: 'Conto Principale',
-      }
-    ];
-
-    relevantTxs.forEach(tx => {
-      const cleanAcc = (tx.account || '').trim().toLowerCase();
-      const isCard = cleanAcc === 'carta' || cleanAcc === 'carta di credito' || cleanAcc === 'carta prepagata';
-      const normAmt = typeof tx.amount === 'number' && !isNaN(tx.amount) ? tx.amount : 0;
-
-      if (tx.type === 'income') {
-        if (isTxLinkedToMainAccount(tx)) {
-          incomeCount++;
-          totalIncome += normAmt;
-          rollingBalance += normAmt;
-          runningHistory.push({
-            date: tx.date,
-            description: tx.description,
-            amount: normAmt,
-            type: tx.type,
-            balance: Math.round(rollingBalance * 100) / 100,
-            account: tx.account,
-          });
-        }
-      } else if (tx.type === 'expense') {
-        if (isTxLinkedToMainAccount(tx)) {
-          if (isCard) {
-            expenseCardCount++;
-            expenseCardAmount += normAmt;
-          } else {
-            expenseDirectCount++;
-            expenseDirectAmount += normAmt;
-          }
-          rollingBalance -= normAmt;
-          runningHistory.push({
-            date: tx.date,
-            description: tx.description,
-            amount: normAmt,
-            type: tx.type,
-            balance: Math.round(rollingBalance * 100) / 100,
-            account: tx.account,
-          });
-        }
-      } else if (tx.type === 'transfer') {
-        transfersCount++;
-        const desc = (tx.description + ' ' + (tx.subcategory || '')).toLowerCase();
-        if (tx.toAccountId === 'main_account' || desc.includes('entrata') || desc.includes('accredito da') || desc.includes('+')) {
-          transfersIn += normAmt;
-          rollingBalance += normAmt;
-        } else if (tx.fromAccountId === 'main_account' || tx.accountId === 'main_account' || desc.includes('ricarica') || desc.includes('giroconto') || desc.includes('trasferimento')) {
-          transfersOut += normAmt;
-          rollingBalance -= normAmt;
-        }
-        runningHistory.push({
-          date: tx.date,
-          description: tx.description,
-          amount: normAmt,
-          type: tx.type,
-          balance: Math.round(rollingBalance * 100) / 100,
-          account: tx.account,
-        });
-      }
-    });
-
-    const totalExpense = isCardLinked
-      ? Math.round((expenseDirectAmount + expenseCardAmount) * 100) / 100
-      : Math.round(expenseDirectAmount * 100) / 100;
-    const expenseCount = isCardLinked ? (expenseDirectCount + expenseCardCount) : expenseDirectCount;
-    const netTransfers = Math.round((transfersIn - transfersOut) * 100) / 100;
-    const currentBalance = Math.round((initialBalance + totalIncome - totalExpense + netTransfers) * 100) / 100;
-
-    return {
-      config: mainAccountConfig,
-      initialBalance,
-      initialDate,
-      totalIncome: Math.round(totalIncome * 100) / 100,
-      totalExpense,
-      expenseDirectCount,
-      expenseDirectAmount: Math.round(expenseDirectAmount * 100) / 100,
-      expenseCardCount,
-      expenseCardAmount: Math.round(expenseCardAmount * 100) / 100,
-      transfersIn: Math.round(transfersIn * 100) / 100,
-      transfersOut: Math.round(transfersOut * 100) / 100,
-      netTransfers,
-      currentBalance,
-      txCount: relevantTxs.length,
-      incomeCount,
-      expenseCount,
-      transfersCount,
-      controlBalance: initialBalance,
-      controlBalanceDate: '2026-08-16',
-      reconciliationDelta: 0.00,
-      isReconciled: true,
-      periodIncome: Math.round(totalIncome * 100) / 100,
-      periodExpense: totalExpense,
-      periodTransfersIn: Math.round(transfersIn * 100) / 100,
-      periodTransfersOut: Math.round(transfersOut * 100) / 100,
-      periodNetTransfers: netTransfers,
-      periodNetFlow: Math.round((totalIncome - totalExpense + netTransfers) * 100) / 100,
-      periodTxCount: relevantTxs.length,
-      periodIncomeCount: incomeCount,
-      periodExpenseCount: expenseCount,
-      runningHistory,
-    };
-  }, [transactions, filteredTransactions, mainAccountConfig]);
-
-  // Carta Prepagata Real-Time Automated Balance Engine (starts from openingBalance € 54,68 at initialDate 2026-08-16)
-  const prepaidAccountSummary = useMemo<PrepaidAccountSummary>(() => {
-    const {
-      initialBalance = 54.68,
-      initialDate = '2026-08-16',
-    } = prepaidCardConfig;
-
-    const isTxLinkedToPrepaid = (tx: Transaction): boolean => {
-      if (tx.accountId === 'prepaid_card') return true;
-      const clean = (tx.account || '').trim().toLowerCase();
-      return clean === 'carta prepagata' || clean === 'carta' || clean === 'carta di credito' || clean === 'prepaid';
-    };
-
-    // ONLY consider transactions strictly AFTER initialDate ('2026-08-16')
-    const recharges = transactions
-      .filter(tx => tx.date > initialDate && tx.type === 'transfer' && (
-        tx.toAccountId === 'prepaid_card' ||
-        (tx.account || '').toLowerCase().includes('carta') ||
-        tx.description.toLowerCase().includes('carta') ||
-        tx.description.toLowerCase().includes('ricarica') ||
-        tx.subcategory?.toLowerCase().includes('ricarica')
-      ))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    // Direct incomes after initialDate
-    const directIncomes = transactions
-      .filter(tx => tx.date > initialDate && tx.type === 'income' && isTxLinkedToPrepaid(tx))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    // Expenses after initialDate
-    const cardExpenses = transactions
-      .filter(tx => tx.date > initialDate && tx.type === 'expense' && isTxLinkedToPrepaid(tx))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    // Transfers out after initialDate
-    const transfersOut = transactions
-      .filter(tx => tx.date > initialDate && tx.type === 'transfer' && tx.fromAccountId === 'prepaid_card')
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    let totalRecharges = 0;
-    recharges.forEach(tx => {
-      const normAmt = typeof tx.amount === 'number' && !isNaN(tx.amount) ? tx.amount : 0;
-      totalRecharges += normAmt;
-    });
-
-    let totalDirectIncome = 0;
-    directIncomes.forEach(tx => {
-      const normAmt = typeof tx.amount === 'number' && !isNaN(tx.amount) ? tx.amount : 0;
-      totalDirectIncome += normAmt;
-    });
-
-    let totalExpenses = 0;
-    cardExpenses.forEach(tx => {
-      const normAmt = typeof tx.amount === 'number' && !isNaN(tx.amount) ? tx.amount : 0;
-      totalExpenses += normAmt;
-    });
-
-    let totalTransfersOut = 0;
-    transfersOut.forEach(tx => {
-      const normAmt = typeof tx.amount === 'number' && !isNaN(tx.amount) ? tx.amount : 0;
-      totalTransfersOut += normAmt;
-    });
-
-    const currentBalance = Math.round((initialBalance + totalRecharges + totalDirectIncome - totalExpenses - totalTransfersOut) * 100) / 100;
-
-    // Running History starts at initialDate with opening balance €54,68
-    let rollingBalance = initialBalance;
-    const runningHistory: { date: string; description: string; amount: number; type: TransactionType; balance: number; account?: string }[] = [
-      {
-        date: initialDate,
-        description: 'Saldo operativo di apertura',
-        amount: initialBalance,
-        type: 'income',
-        balance: initialBalance,
-      }
-    ];
-
-    const allCardEvents = [
-      ...recharges.map(r => ({ ...r, eventType: 'recharge' as const })),
-      ...directIncomes.map(i => ({ ...i, eventType: 'income' as const })),
-      ...cardExpenses.map(e => ({ ...e, eventType: 'expense' as const })),
-      ...transfersOut.map(t => ({ ...t, eventType: 'transfer_out' as const }))
-    ].sort((a, b) => a.date.localeCompare(b.date));
-
-    allCardEvents.forEach(evt => {
-      const normAmt = typeof evt.amount === 'number' && !isNaN(evt.amount) ? evt.amount : 0;
-      if (evt.eventType === 'recharge' || evt.eventType === 'income') {
-        rollingBalance += normAmt;
-        runningHistory.push({
-          date: evt.date,
-          description: evt.description,
-          amount: normAmt,
-          type: evt.type,
-          balance: Math.round(rollingBalance * 100) / 100,
-        });
-      } else {
-        rollingBalance -= normAmt;
-        runningHistory.push({
-          date: evt.date,
-          description: evt.description,
-          amount: normAmt,
-          type: evt.type,
-          balance: Math.round(rollingBalance * 100) / 100,
-        });
-      }
-    });
-
-    return {
-      config: prepaidCardConfig,
-      initialBalance,
-      initialDate,
-      rechargesIn: Math.round(totalRecharges * 100) / 100,
-      totalRecharges: Math.round(totalRecharges * 100) / 100,
-      rechargesCount: recharges.length,
-      cardExpenses: Math.round(totalExpenses * 100) / 100,
-      totalExpenses: Math.round(totalExpenses * 100) / 100,
-      cardExpensesCount: cardExpenses.length,
-      expensesCount: cardExpenses.length,
-      currentBalance,
-      controlBalance: initialBalance,
-      reconciliationDelta: 0.00,
-      isReconciled: true,
-      runningHistory,
-    };
-  }, [transactions, filteredTransactions, prepaidCardConfig]);
-
-  // Overall Liquidity Summary
-  const overallLiquiditySummary = useMemo<OverallLiquiditySummary>(() => {
-    const mainAccBal = mainAccountSummary.currentBalance;
-    const prepCardBal = prepaidAccountSummary.currentBalance;
-    const totalLiquidity = Math.round((mainAccBal + prepCardBal) * 100) / 100;
-
-    return {
-      mainAccountBalance: mainAccBal,
-      prepaidCardBalance: prepCardBal,
-      totalLiquidity,
-      totalControlBalance: totalLiquidity,
-      totalDelta: 0.00,
-      isReconciled: true,
-    };
-  }, [mainAccountSummary, prepaidAccountSummary]);
+  const aggregateSummary = useMemo<AggregateSummary>(
+    () => computeAggregateSummary(accountSummaries),
+    [accountSummaries]
+  );
 
   // Allocation Plan handlers
   const updateAllocationPlan = (planChanges: Partial<AllocationPlan>) => {
@@ -1663,6 +1560,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   const exportFullBackupJSON = () => {
     const res = exportJSONUtil({
       transactions,
+      accounts,
       mainAccountConfig,
       prepaidCardConfig,
       allocationPlan,
@@ -1705,11 +1603,17 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     });
   };
 
-  const restoreFullBackup = (backup: BackupData): { success: boolean; message: string; details?: RestoreBackupDetails } => {
+  const restoreFullBackup = (backupInput: BackupData): { success: boolean; message: string; details?: RestoreBackupDetails } => {
     try {
-      if (!backup || !Array.isArray(backup.transactions)) {
+      if (!backupInput || !Array.isArray(backupInput.transactions)) {
         return { success: false, message: 'Dati di backup non validi: archivio transazioni assente.' };
       }
+
+      // Normalize to schema v2 regardless of what was uploaded (v1 fixed
+      // main/prepaid pair, or v2 accounts[]) - same migration used for the
+      // one-time live localStorage migration, verified against real data
+      // (see MIGRATION_DRYRUN_REPORT.md).
+      const backup = migrateBackupToV2(backupInput);
 
       // 1. Transactions
       setTransactions(backup.transactions);
@@ -1719,23 +1623,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         console.error('Failed to save transactions to localStorage', e);
       }
 
-      // 2. Main account config
-      if (backup.mainAccountConfig) {
-        setMainAccountConfig(backup.mainAccountConfig);
+      // 2. Accounts
+      if (backup.accounts && backup.accounts.length > 0) {
+        setAccounts(backup.accounts);
         try {
-          localStorage.setItem(LOCAL_STORAGE_MAIN_ACC_KEY, JSON.stringify(backup.mainAccountConfig));
+          localStorage.setItem(LOCAL_STORAGE_ACCOUNTS_KEY, JSON.stringify(backup.accounts));
         } catch (e) {
-          console.error('Failed to save mainAccountConfig to localStorage', e);
-        }
-      }
-
-      // 2b. Prepaid card config
-      if (backup.prepaidCardConfig) {
-        setPrepaidCardConfig(backup.prepaidCardConfig);
-        try {
-          localStorage.setItem(LOCAL_STORAGE_PREPAID_KEY, JSON.stringify(backup.prepaidCardConfig));
-        } catch (e) {
-          console.error('Failed to save prepaidCardConfig to localStorage', e);
+          console.error('Failed to save accounts to localStorage', e);
         }
       }
 
@@ -1870,6 +1764,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       addTransaction,
       updateTransaction,
       updateTransactionType,
+      completeIncompleteTransfer,
       deleteTransaction,
       deleteTransactionsBulk,
       duplicateTransaction,
@@ -1893,16 +1788,26 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       isCategoryMigrationModalOpen,
       openCategoryMigrationModal,
       closeCategoryMigrationModal,
+      accounts,
+      accountSummaries,
+      aggregateSummary,
+      addAccount,
+      updateAccount,
+      deleteAccount,
+      createTransfer,
+      isAddAccountModalOpen,
+      openAddAccountModal,
+      closeAddAccountModal,
+      isTransferModalOpen,
+      openTransferModal,
+      closeTransferModal,
       mainAccountConfig,
       updateMainAccountConfig,
-      mainAccountSummary,
       isAccountConfigModalOpen,
       openAccountConfigModal,
       closeAccountConfigModal,
       prepaidCardConfig,
       updatePrepaidCardConfig,
-      prepaidAccountSummary,
-      overallLiquiditySummary,
       isPrepaidConfigModalOpen,
       openPrepaidConfigModal,
       closePrepaidConfigModal,

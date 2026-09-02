@@ -1,22 +1,24 @@
 import * as XLSX from 'xlsx';
-import { 
-  BackupData, 
-  Transaction, 
-  MainAccountConfig, 
+import {
+  BackupData,
+  Transaction,
+  MainAccountConfig,
   PrepaidCardConfig,
-  AllocationPlan, 
-  WealthItem, 
-  FinancialGoal, 
-  AuditLogEntry, 
+  Account,
+  AllocationPlan,
+  WealthItem,
+  FinancialGoal,
+  AuditLogEntry,
   IntegrityCheckResult,
   ExpenseCategory,
   IncomeCategory
 } from '../types';
 import { loadSavedPresets } from './excelParser';
 import { getErrorMessage } from './formatters';
+import { SCHEMA_V2 } from './schemaMigration';
 
 export const APP_VERSION = '1.2.0';
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = SCHEMA_V2;
 export const LAST_BACKUP_STORAGE_KEY = 'findashboard_last_backup_date';
 
 const DEFAULT_EXPENSE_CATEGORIES: ExpenseCategory[] = [
@@ -97,6 +99,7 @@ export function triggerFileDownload(blob: Blob, filename: string): void {
  */
 export function buildBackupPayload(params: {
   transactions: Transaction[];
+  accounts: Account[];
   mainAccountConfig: MainAccountConfig;
   prepaidCardConfig?: PrepaidCardConfig;
   allocationPlan: AllocationPlan;
@@ -114,6 +117,9 @@ export function buildBackupPayload(params: {
     exportDate: now,
     version: APP_VERSION,
     transactions: params.transactions,
+    accounts: params.accounts,
+    // Kept for compatibility with anything still reading the old fixed pair
+    // (e.g. the restore-preview UI in SettingsView) - derived from `accounts`.
     mainAccountConfig: params.mainAccountConfig,
     prepaidCardConfig: params.prepaidCardConfig,
     categories: {
@@ -145,6 +151,7 @@ export function buildBackupPayload(params: {
  */
 export function exportFullBackupJSON(params: {
   transactions: Transaction[];
+  accounts: Account[];
   mainAccountConfig: MainAccountConfig;
   prepaidCardConfig?: PrepaidCardConfig;
   allocationPlan: AllocationPlan;
