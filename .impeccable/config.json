@@ -47,6 +47,15 @@
         ],
         "createdAt": "2026-09-01T14:03:18.662Z",
         "reason": "pre-existing styling unrelated to this session's any-removal cleanup"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/accounts/AccountsView.tsx"
+        ],
+        "createdAt": "2026-09-02T14:54:54.576Z",
+        "reason": "ternary tab-button classes: text-slate-400 branch pairs with the dark container bg, not the cyan active-state bg the static scanner sees in the same template literal; same pattern existed in the pre-rewrite file"
       }
     ]
   }

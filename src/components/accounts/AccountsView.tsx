@@ -1,116 +1,110 @@
-import React, { useState, useMemo } from 'react';
-import { 
-  Building2, 
-  Wallet, 
-  CreditCard, 
-  PiggyBank, 
-  TrendingUp, 
-  Coins, 
-  ArrowUpRight, 
-  ArrowDownRight, 
-  ArrowLeftRight, 
-  Edit3, 
-  FileSpreadsheet, 
-  Undo2, 
-  Search, 
-  Calculator, 
-  ShieldCheck, 
-  Calendar,
+import React, { useMemo, useState } from 'react';
+import {
+  Wallet,
+  ArrowUpRight,
+  ArrowDownRight,
+  ArrowLeftRight,
+  Edit3,
+  FileSpreadsheet,
+  Undo2,
+  Search,
+  ShieldCheck,
   CheckCircle2,
   Plus,
   Trash2,
   AlertTriangle,
-  Scale,
-  Check,
-  Info,
-  Layers
+  HelpCircle,
 } from 'lucide-react';
-import { 
-  ResponsiveContainer, 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip 
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
 } from 'recharts';
 import { useFinance } from '../../context/FinanceContext';
 import { formatCurrency, formatDateItalian, getCategoryColor } from '../../utils/formatters';
+import { ACCOUNT_KIND_META } from '../../utils/accountPresentation';
+import { ACCOUNT_LIMITS } from '../../utils/accountRules';
+import { AddAccountModal } from './AddAccountModal';
+import { TransferModal } from './TransferModal';
 
 export const AccountsView: React.FC = () => {
-  const { 
-    mainAccountSummary, 
-    mainAccountConfig, 
-    updateMainAccountConfig,
-    prepaidAccountSummary,
-    prepaidCardConfig,
-    updatePrepaidCardConfig,
-    overallLiquiditySummary,
-    openAccountConfigModal, 
-    openPrepaidConfigModal,
-    openImportModal, 
-    openAddModal, 
-    openEditModal, 
-    deleteTransaction, 
-    lastImportBatch, 
-    undoLastImport, 
+  const {
+    accounts,
+    accountSummaries,
+    aggregateSummary,
+    deleteAccount,
+    openAddAccountModal,
+    openTransferModal,
+    openImportModal,
+    openAddModal,
+    openEditModal,
+    deleteTransaction,
+    lastImportBatch,
+    undoLastImport,
     transactions,
-    openDiagnosticsModal
+    openDiagnosticsModal,
   } = useFinance();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [activeAccountTab, setActiveAccountTab] = useState<'all' | 'main' | 'prepaid'>('all');
+  const [activeAccountTab, setActiveAccountTab] = useState<string>('all');
   const [undoStatusMessage, setUndoStatusMessage] = useState<string | null>(null);
-  const [showCalculationDetail, setShowCalculationDetail] = useState(true);
+  const [editAccountId, setEditAccountId] = useState<string | null>(null);
 
-  // Control balance manual adjustment inline state (Main account)
-  const [isEditingMainControl, setIsEditingMainControl] = useState(false);
-  const [mainControlInput, setMainControlInput] = useState((mainAccountConfig.controlBalance ?? 3075.00).toString());
-  const [mainControlDateInput, setMainControlDateInput] = useState(mainAccountConfig.controlBalanceDate || '2026-08-16');
+  const canDelete = accounts.length > ACCOUNT_LIMITS.MIN_ACCOUNTS;
+  const canAdd = accounts.length < ACCOUNT_LIMITS.MAX_ACCOUNTS;
 
-  // Control balance manual adjustment inline state (Prepaid card)
-  const [isEditingPrepaidControl, setIsEditingPrepaidControl] = useState(false);
-  const [prepaidControlInput, setPrepaidControlInput] = useState((prepaidCardConfig.controlBalance ?? 58.68).toString());
-  const [prepaidControlDateInput, setPrepaidControlDateInput] = useState(prepaidCardConfig.controlBalanceDate || '2026-08-16');
+  // Transactions whose accountId doesn't match any configured account
+  // (e.g. a legacy 'cash_account' tag never promoted to a real account).
+  const orphanAccountGroups = useMemo(() => {
+    const knownIds = new Set(accounts.map(a => a.id));
+    const groups = new Map<string, { label: string; count: number; total: number }>();
+    for (const tx of transactions) {
+      if (!tx.accountId || knownIds.has(tx.accountId)) continue;
+      const key = tx.accountId;
+      const existing = groups.get(key) || { label: tx.accountLabel || tx.account || key, count: 0, total: 0 };
+      existing.count += 1;
+      existing.total += tx.type === 'expense' ? -tx.amount : tx.amount;
+      groups.set(key, existing);
+    }
+    return Array.from(groups.entries()).map(([id, g]) => ({ id, ...g }));
+  }, [accounts, transactions]);
 
-  // Filtered transactions for the view
+  const incompleteTransfersCount = useMemo(
+    () => transactions.filter(t => t.transferAccountsIncomplete).length,
+    [transactions]
+  );
+
   const displayTxs = useMemo(() => {
     return transactions
       .filter(t => {
-        if (activeAccountTab === 'main') {
-          return t.account === 'Conto Principale';
-        }
-        if (activeAccountTab === 'prepaid') {
-          return t.account === 'Carta prepagata' || t.account === 'Carta' || t.account === 'Carta di Credito';
-        }
-        return true;
+        if (activeAccountTab === 'all') return true;
+        return t.accountId === activeAccountTab;
       })
       .filter(t => {
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase();
-          const matchDesc = t.description.toLowerCase().includes(q);
-          const matchCat = t.category.toLowerCase().includes(q);
-          const matchAcc = t.account.toLowerCase().includes(q);
-          if (!matchDesc && !matchCat && !matchAcc) return false;
-        }
-        if (selectedCategory !== 'all' && t.category !== selectedCategory) {
-          return false;
-        }
-        return true;
+        if (!searchQuery.trim()) return true;
+        const q = searchQuery.toLowerCase();
+        return (
+          t.description.toLowerCase().includes(q) ||
+          t.category.toLowerCase().includes(q) ||
+          (t.account || '').toLowerCase().includes(q)
+        );
       })
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [transactions, searchQuery, selectedCategory, activeAccountTab]);
+  }, [transactions, searchQuery, activeAccountTab]);
 
-  const mainAccountTxCount = transactions.filter(t => t.account === 'Conto Principale').length;
-  const prepaidCardTxCount = transactions.filter(t => t.account === 'Carta prepagata' || t.account === 'Carta' || t.account === 'Carta di Credito').length;
+  const txCountByAccount = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const a of accounts) counts[a.id] = transactions.filter(t => t.accountId === a.id).length;
+    return counts;
+  }, [accounts, transactions]);
 
-  // Running balance chart data points
+  const chartAccountId = activeAccountTab !== 'all' ? activeAccountTab : accounts[0]?.id;
   const chartData = useMemo(() => {
-    const history = activeAccountTab === 'prepaid' 
-      ? prepaidAccountSummary.runningHistory 
-      : mainAccountSummary.runningHistory;
-
+    const history = chartAccountId ? accountSummaries[chartAccountId]?.runningHistory : undefined;
     if (!history || history.length === 0) return [];
     return history.map((pt, idx) => ({
       index: idx,
@@ -118,10 +112,8 @@ export const AccountsView: React.FC = () => {
       displayDate: formatDateItalian(pt.date),
       balance: Math.round(pt.balance * 100) / 100,
       description: pt.description,
-      amount: pt.amount,
-      type: pt.type,
     }));
-  }, [activeAccountTab, mainAccountSummary.runningHistory, prepaidAccountSummary.runningHistory]);
+  }, [chartAccountId, accountSummaries]);
 
   const handleUndoImport = () => {
     if (!lastImportBatch) return;
@@ -134,31 +126,15 @@ export const AccountsView: React.FC = () => {
     }
   };
 
-  const handleSaveMainControlBalance = () => {
-    const parsed = parseFloat(mainControlInput.replace(',', '.'));
-    if (!isNaN(parsed)) {
-      updateMainAccountConfig({
-        controlBalance: parsed,
-        controlBalanceDate: mainControlDateInput
-      });
-      setIsEditingMainControl(false);
-    }
-  };
-
-  const handleSavePrepaidControlBalance = () => {
-    const parsed = parseFloat(prepaidControlInput.replace(',', '.'));
-    if (!isNaN(parsed)) {
-      updatePrepaidCardConfig({
-        controlBalance: parsed,
-        controlBalanceDate: prepaidControlDateInput
-      });
-      setIsEditingPrepaidControl(false);
-    }
+  const handleDeleteAccount = (id: string, label: string) => {
+    if (!window.confirm(`Eliminare il conto "${label}"? Le transazioni storiche non verranno eliminate, ma mostreranno questo conto come non configurato.`)) return;
+    const res = deleteAccount(id);
+    if (!res.success) window.alert(res.message);
   };
 
   return (
     <div className="space-y-6 w-full" id="accounts-view-container">
-      
+
       {/* 1. Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#111C38] border border-slate-800 rounded-2xl p-5 shadow-lg">
         <div>
@@ -166,17 +142,16 @@ export const AccountsView: React.FC = () => {
             <h1 className="text-xl font-bold text-slate-100 tracking-tight">Gestione Conti & Liquidità</h1>
             <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
               <ShieldCheck className="w-3 h-3" />
-              <span>Conti Operativi Attivi</span>
+              <span>{accounts.length} conti attivi</span>
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Gestione multi-conto separata: Conto Principale con ricariche in uscita e Carta prepagata con saldo operativo autonomo.
+            Gestione multi-conto (2-4 conti): ciascun conto ha saldo operativo autonomo, aggiornato dai movimenti collegati.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
-            id="btn-accounts-diagnostics"
             onClick={openDiagnosticsModal}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer"
           >
@@ -185,16 +160,14 @@ export const AccountsView: React.FC = () => {
           </button>
 
           <button
-            id="btn-accounts-edit-initial"
-            onClick={openAccountConfigModal}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer"
+            onClick={openTransferModal}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 text-xs font-bold border border-sky-500/30 transition cursor-pointer"
           >
-            <Edit3 className="w-3.5 h-3.5 text-sky-400" />
-            <span>Configura Conti & Saldi</span>
+            <ArrowLeftRight className="w-3.5 h-3.5" />
+            <span>Trasferimento</span>
           </button>
 
           <button
-            id="btn-accounts-import-excel"
             onClick={openImportModal}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30 transition cursor-pointer"
           >
@@ -203,7 +176,6 @@ export const AccountsView: React.FC = () => {
           </button>
 
           <button
-            id="btn-accounts-new-tx"
             onClick={openAddModal}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 text-xs font-bold shadow-md shadow-cyan-500/20 transition cursor-pointer"
           >
@@ -225,7 +197,6 @@ export const AccountsView: React.FC = () => {
           </div>
           <button
             type="button"
-            id="btn-undo-last-import"
             onClick={handleUndoImport}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-semibold border border-rose-500/40 transition cursor-pointer shrink-0"
           >
@@ -242,201 +213,168 @@ export const AccountsView: React.FC = () => {
         </div>
       )}
 
-      {/* 2. Overall Liquidity Banner */}
+      {incompleteTransfersCount > 0 && (
+        <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              {incompleteTransfersCount} trasferiment{incompleteTransfersCount === 1 ? 'o' : 'i'} storic{incompleteTransfersCount === 1 ? 'o' : 'i'} senza conto di destinazione noto — non conteggiati nei saldi dei conti finché non li completi.
+            </span>
+          </div>
+          <button onClick={openDiagnosticsModal} className="text-amber-300 hover:text-amber-200 font-semibold underline cursor-pointer shrink-0">
+            Vedi in Diagnostica
+          </button>
+        </div>
+      )}
+
+      {/* 2. Aggregate Liquidity Banner */}
       <div className="bg-[#111C38] border border-cyan-500/30 rounded-2xl p-5 shadow-xl">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-          <div>
-            <div className="flex items-center gap-2 text-cyan-400 font-semibold text-xs uppercase tracking-wider">
-              <Wallet className="w-4 h-4" />
-              <span>Quadro Generale Liquidità Disponibile</span>
-            </div>
-            <div className="text-3xl sm:text-4xl font-extrabold text-slate-100 font-mono tracking-tight my-1">
-              {formatCurrency(overallLiquiditySummary.totalLiquidity)}
-            </div>
-            <div className="text-xs text-slate-400 flex items-center gap-3 flex-wrap">
-              <span>Conto Principale: <strong className="text-cyan-300 font-mono">{formatCurrency(mainAccountSummary.currentBalance)}</strong></span>
-              <span>•</span>
-              <span>Carta prepagata: <strong className="text-pink-300 font-mono">{formatCurrency(prepaidAccountSummary.currentBalance)}</strong></span>
-              <span>•</span>
-              <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Liquidità calcolata dai saldi operativi</span>
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowCalculationDetail(!showCalculationDetail)}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-semibold border border-cyan-500/30 flex items-center gap-2 transition cursor-pointer"
-            >
-              <Calculator className="w-4 h-4" />
-              <span>{showCalculationDetail ? 'Nascondi Formule di Calcolo' : 'Mostra Formule di Calcolo'}</span>
-            </button>
-          </div>
+        <div className="flex items-center gap-2 text-cyan-400 font-semibold text-xs uppercase tracking-wider">
+          <Wallet className="w-4 h-4" />
+          <span>Quadro Generale Liquidità Disponibile</span>
+        </div>
+        <div className="text-3xl sm:text-4xl font-extrabold text-slate-100 font-mono tracking-tight my-1">
+          {formatCurrency(aggregateSummary.totalLiquidity)}
+        </div>
+        <div className="text-xs text-slate-400 flex items-center gap-3 flex-wrap">
+          {accounts.map((a, idx) => (
+            <React.Fragment key={a.id}>
+              {idx > 0 && <span>•</span>}
+              <span>{a.label}: <strong className={`${ACCOUNT_KIND_META[a.kind].accentText} font-mono`}>{formatCurrency(accountSummaries[a.id]?.currentBalance ?? a.initialBalance)}</strong></span>
+            </React.Fragment>
+          ))}
         </div>
       </div>
 
-      {/* 3. Account Cards Grid (Conto Principale & Carta Prepagata) */}
+      {/* 3. Account Cards Grid (2-4 accounts, generic) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* Conto Principale Card */}
-        <div className="bg-[#111C38] border border-cyan-500/40 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-                  <Building2 className="w-5 h-5" />
+        {accounts.map(account => {
+          const summary = accountSummaries[account.id];
+          const meta = ACCOUNT_KIND_META[account.kind];
+          const Icon = meta.icon;
+          return (
+            <div key={account.id} className={`bg-[#111C38] border ${meta.cardBorder} rounded-2xl p-5 shadow-xl flex flex-col justify-between`}>
+              <div>
+                <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl ${meta.badgeBg} border ${meta.badgeBorder} flex items-center justify-center ${meta.badgeText}`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-100">{account.label}</h2>
+                      <div className="text-[11px] text-slate-400 font-mono">
+                        {meta.label} · Data saldo: <strong className="text-slate-200">{formatDateItalian(account.initialDate)}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <div className="text-xs text-slate-400 uppercase font-semibold">Saldo Attuale</div>
+                    <div className={`text-2xl font-black font-mono ${meta.accentText}`}>{formatCurrency(summary?.currentBalance ?? account.initialBalance)}</div>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-100">{mainAccountConfig.accountLabel || 'Conto Corrente Principale'}</h2>
-                  <div className="text-[11px] text-slate-400 font-mono">
-                    Data saldo: <strong className="text-slate-200">16/08/2026</strong>
+
+                <div className="grid grid-cols-3 gap-2.5 my-4">
+                  <div className="bg-[#090D16] p-2.5 rounded-xl border border-slate-800">
+                    <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center justify-between">
+                      <span>+ Entrate</span>
+                      <ArrowUpRight className="w-3 h-3 text-emerald-400" />
+                    </div>
+                    <div className="text-xs font-bold font-mono text-emerald-400 mt-0.5">+{formatCurrency(summary?.totalIncome ?? 0)}</div>
+                    <div className="text-[10px] text-slate-500">{summary?.incomeCount ?? 0} movimenti</div>
+                  </div>
+                  <div className="bg-[#090D16] p-2.5 rounded-xl border border-slate-800">
+                    <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center justify-between">
+                      <span>- Spese</span>
+                      <ArrowDownRight className="w-3 h-3 text-rose-400" />
+                    </div>
+                    <div className="text-xs font-bold font-mono text-rose-400 mt-0.5">-{formatCurrency(summary?.totalExpense ?? 0)}</div>
+                    <div className="text-[10px] text-slate-500">{summary?.expenseCount ?? 0} movimenti</div>
+                  </div>
+                  <div className="bg-[#090D16] p-2.5 rounded-xl border border-slate-800">
+                    <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center justify-between">
+                      <span>+/- Trasf.</span>
+                      <ArrowLeftRight className="w-3 h-3 text-amber-400" />
+                    </div>
+                    <div className="text-xs font-bold font-mono text-amber-300 mt-0.5">{formatCurrency(summary?.netTransfers ?? 0)}</div>
+                    <div className="text-[10px] text-slate-500">{summary?.transfersCount ?? 0} movimenti</div>
                   </div>
                 </div>
               </div>
 
-              <div className="text-right">
-                <div className="text-xs text-slate-400 uppercase font-semibold">Saldo Attuale</div>
-                <div className="text-2xl font-black font-mono text-cyan-300">{formatCurrency(mainAccountSummary.currentBalance)}</div>
+              <div className="mt-2 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-medium">Saldo operativo autonomo aggiornato dai movimenti</span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button
+                    onClick={() => setEditAccountId(account.id)}
+                    className={`flex items-center gap-1 ${meta.accentText} hover:opacity-80 font-semibold cursor-pointer`}
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>Modifica</span>
+                  </button>
+                  {canDelete && (
+                    <button
+                      onClick={() => handleDeleteAccount(account.id, account.label)}
+                      className="flex items-center gap-1 text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Elimina</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
+          );
+        })}
 
-            {/* Dettaglio Movimenti Successivi al 16/08/2026 */}
-            <div className="my-4 p-3.5 bg-[#090D16] rounded-xl border border-cyan-500/20 text-xs font-mono space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400 font-sans text-[11px]">Movimenti successivi alla data saldo:</span>
-                <strong className={`font-mono text-xs ${mainAccountSummary.periodNetFlow >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {formatCurrency(mainAccountSummary.periodNetFlow)}
-                </strong>
-              </div>
-
-              <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80">
-                <span className="text-slate-200 font-sans font-semibold text-xs">Saldo attuale:</span>
-                <strong className="text-cyan-300 font-mono text-base font-bold">{formatCurrency(mainAccountSummary.currentBalance)}</strong>
-              </div>
-            </div>
-
-            {/* Metrics Breakdown (movimenti post-16/08) */}
-            <div className="grid grid-cols-3 gap-2.5 mb-2">
-              <div className="bg-[#090D16] p-2.5 rounded-xl border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center justify-between">
-                  <span>+ Entrate</span>
-                  <ArrowUpRight className="w-3 h-3 text-emerald-400" />
-                </div>
-                <div className="text-xs font-bold font-mono text-emerald-400 mt-0.5">+{formatCurrency(mainAccountSummary.totalIncome)}</div>
-                <div className="text-[10px] text-slate-500">{mainAccountSummary.incomeCount} post-16/08</div>
-              </div>
-
-              <div className="bg-[#090D16] p-2.5 rounded-xl border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center justify-between">
-                  <span>- Spese</span>
-                  <ArrowDownRight className="w-3 h-3 text-rose-400" />
-                </div>
-                <div className="text-xs font-bold font-mono text-rose-400 mt-0.5">-{formatCurrency(mainAccountSummary.totalExpense)}</div>
-                <div className="text-[10px] text-slate-500">{mainAccountSummary.expenseCount} post-16/08</div>
-              </div>
-
-              <div className="bg-[#090D16] p-2.5 rounded-xl border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center justify-between">
-                  <span>+/- Trasferimenti</span>
-                  <ArrowLeftRight className="w-3 h-3 text-amber-400" />
-                </div>
-                <div className="text-xs font-bold font-mono text-amber-300 mt-0.5">{formatCurrency(mainAccountSummary.netTransfers)}</div>
-                <div className="text-[10px] text-slate-500">{mainAccountSummary.transfersCount} post-16/08</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-            <span className="text-slate-400 font-medium">Saldo operativo autonomo aggiornato dai movimenti</span>
-            <button
-              onClick={openAccountConfigModal}
-              className="text-cyan-400 hover:text-cyan-300 font-semibold underline cursor-pointer"
-            >
-              Modifica Parametri
-            </button>
-          </div>
-        </div>
-
-        {/* Carta Prepagata Card */}
-        <div className="bg-[#111C38] border border-pink-500/40 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-pink-500/15 border border-pink-500/30 flex items-center justify-center text-pink-400">
-                  <CreditCard className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-100">{prepaidCardConfig.accountLabel || 'Carta Prepagata'}</h2>
-                  <div className="text-[11px] text-slate-400 font-mono">
-                    Data saldo: <strong className="text-slate-200">16/08/2026</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div className="text-right">
-                <div className="text-xs text-slate-400 uppercase font-semibold">Saldo Attuale</div>
-                <div className="text-2xl font-black font-mono text-pink-300">{formatCurrency(prepaidAccountSummary.currentBalance)}</div>
-              </div>
-            </div>
-
-            {/* Dettaglio Movimenti Successivi al 16/08/2026 */}
-            <div className="my-4 p-3.5 bg-[#090D16] rounded-xl border border-pink-500/20 text-xs font-mono space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400 font-sans text-[11px]">Movimenti successivi alla data saldo:</span>
-                <strong className={`font-mono text-xs ${prepaidAccountSummary.rechargesIn - prepaidAccountSummary.cardExpenses >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {formatCurrency(prepaidAccountSummary.rechargesIn - prepaidAccountSummary.cardExpenses)}
-                </strong>
-              </div>
-
-              <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80">
-                <span className="text-slate-200 font-sans font-semibold text-xs">Saldo attuale:</span>
-                <strong className="text-pink-300 font-mono text-base font-bold">{formatCurrency(prepaidAccountSummary.currentBalance)}</strong>
-              </div>
-            </div>
-
-            {/* Metrics Breakdown (movimenti post-16/08) */}
-            <div className="grid grid-cols-2 gap-3 mb-2">
-              <div className="bg-[#090D16] p-2.5 rounded-xl border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center justify-between">
-                  <span>+ Ricariche</span>
-                  <ArrowLeftRight className="w-3 h-3 text-sky-400" />
-                </div>
-                <div className="text-xs font-bold font-mono text-sky-300 mt-0.5">+{formatCurrency(prepaidAccountSummary.rechargesIn)}</div>
-                <div className="text-[10px] text-slate-500">{prepaidAccountSummary.rechargesCount} post-16/08</div>
-              </div>
-
-              <div className="bg-[#090D16] p-2.5 rounded-xl border border-slate-800">
-                <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center justify-between">
-                  <span>- Spese</span>
-                  <ArrowDownRight className="w-3 h-3 text-rose-400" />
-                </div>
-                <div className="text-xs font-bold font-mono text-rose-400 mt-0.5">-{formatCurrency(prepaidAccountSummary.cardExpenses)}</div>
-                <div className="text-[10px] text-slate-500">{prepaidAccountSummary.cardExpensesCount} post-16/08</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-            <span className="text-slate-400 font-medium">Saldo operativo autonomo aggiornato dai movimenti</span>
-            <button
-              onClick={openPrepaidConfigModal}
-              className="text-pink-400 hover:text-pink-300 font-semibold underline cursor-pointer"
-            >
-              Modifica Parametri
-            </button>
-          </div>
-        </div>
-
+        {/* Add-account tile */}
+        <button
+          onClick={openAddAccountModal}
+          disabled={!canAdd}
+          title={!canAdd ? `Massimo ${ACCOUNT_LIMITS.MAX_ACCOUNTS} conti raggiunto` : 'Aggiungi conto'}
+          className={`rounded-2xl border-2 border-dashed p-5 flex flex-col items-center justify-center gap-2 min-h-[220px] transition ${
+            canAdd
+              ? 'border-slate-700 hover:border-emerald-500/50 text-slate-400 hover:text-emerald-300 cursor-pointer'
+              : 'border-slate-800 text-slate-600 cursor-not-allowed'
+          }`}
+        >
+          <Plus className="w-8 h-8" />
+          <span className="text-sm font-semibold">{canAdd ? 'Aggiungi Conto' : `Massimo ${ACCOUNT_LIMITS.MAX_ACCOUNTS} conti raggiunto`}</span>
+          {!canAdd && <span className="text-[11px] text-slate-500">Elimina un conto per aggiungerne un altro</span>}
+        </button>
       </div>
+
+      {/* Orphan account references (e.g. legacy 'cash_account') */}
+      {orphanAccountGroups.length > 0 && (
+        <div className="bg-[#111C38] border border-amber-500/30 rounded-2xl p-5 shadow-lg">
+          <div className="flex items-center gap-2 text-amber-300 font-semibold text-xs uppercase tracking-wider mb-3">
+            <HelpCircle className="w-4 h-4" />
+            <span>Riferimenti a conti non configurati</span>
+          </div>
+          <p className="text-xs text-slate-400 mb-3">
+            Queste transazioni fanno riferimento a un conto che non è (più) tra quelli configurati. Non sono state riassegnate automaticamente — puoi promuoverle a nuovo conto se {canAdd ? 'vuoi' : 'liberi uno slot'}.
+          </p>
+          <div className="space-y-2">
+            {orphanAccountGroups.map(g => (
+              <div key={g.id} className="flex items-center justify-between p-3 rounded-xl bg-[#090D16] border border-slate-800 text-xs">
+                <div>
+                  <span className="font-semibold text-slate-200">{g.label}</span>
+                  <span className="text-slate-500 ml-2 font-mono">({g.id})</span>
+                  <span className="text-slate-500 ml-2">{g.count} movimento{g.count === 1 ? '' : 'i'}</span>
+                </div>
+                <span className="font-mono font-bold text-slate-300">{formatCurrency(g.total)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 4. Running Balance Progression Chart */}
       <div className="bg-[#111C38] border border-slate-800 rounded-2xl p-5 shadow-lg">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
           <div>
             <h3 className="text-base font-bold text-slate-100">
-              Evoluzione Storica Saldo {activeAccountTab === 'prepaid' ? 'Carta Prepagata' : 'Conto Principale'}
+              Evoluzione Storica Saldo {chartAccountId ? accounts.find(a => a.id === chartAccountId)?.label : ''}
             </h3>
             <p className="text-xs text-slate-400">Andamento progressivo cumulato giorno per giorno nel periodo</p>
           </div>
@@ -450,25 +388,14 @@ export const AccountsView: React.FC = () => {
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="mainBalanceGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={activeAccountTab === 'prepaid' ? '#ec4899' : '#06B6D4'} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={activeAccountTab === 'prepaid' ? '#ec4899' : '#06B6D4'} stopOpacity={0.0} />
+                  <linearGradient id="accountBalanceGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#06B6D4" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#06B6D4" stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                <XAxis 
-                  dataKey="date" 
-                  stroke="#64748b" 
-                  fontSize={11}
-                  tickLine={false}
-                  tickFormatter={(val) => formatDateItalian(val)}
-                />
-                <YAxis 
-                  stroke="#64748b" 
-                  fontSize={11}
-                  tickLine={false}
-                  tickFormatter={(val) => `€${val}`}
-                />
+                <XAxis dataKey="date" stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(val) => formatDateItalian(val)} />
+                <YAxis stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(val) => `€${val}`} />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
@@ -479,9 +406,7 @@ export const AccountsView: React.FC = () => {
                           <div className="text-slate-200 font-semibold">{data.description}</div>
                           <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
                             <span className="text-slate-400">Saldo progressivo:</span>
-                            <span className={`font-bold font-mono text-sm ${activeAccountTab === 'prepaid' ? 'text-pink-300' : 'text-cyan-300'}`}>
-                              {formatCurrency(data.balance)}
-                            </span>
+                            <span className="font-bold font-mono text-sm text-cyan-300">{formatCurrency(data.balance)}</span>
                           </div>
                         </div>
                       );
@@ -489,14 +414,7 @@ export const AccountsView: React.FC = () => {
                     return null;
                   }}
                 />
-                <Area 
-                  type="monotone" 
-                  dataKey="balance" 
-                  stroke={activeAccountTab === 'prepaid' ? '#ec4899' : '#06B6D4'} 
-                  strokeWidth={2.5} 
-                  fillOpacity={1} 
-                  fill="url(#mainBalanceGradient)" 
-                />
+                <Area type="monotone" dataKey="balance" stroke="#06B6D4" strokeWidth={2.5} fillOpacity={1} fill="url(#accountBalanceGradient)" />
               </AreaChart>
             </ResponsiveContainer>
           ) : (
@@ -509,52 +427,32 @@ export const AccountsView: React.FC = () => {
 
       {/* 5. Filterable List of Transactions Assigned to Accounts */}
       <div className="bg-[#111C38] border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
-        
-        {/* Toolbar & Tabs */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-bold text-slate-100">Movimenti Reali del Periodo</h3>
-            <p className="text-xs text-slate-400">
-              1 accredito (€ 100,00), 3 giroconti ricarica (€ 425,00), 18 spese con carta (€ 928,00)
-            </p>
-          </div>
+          <h3 className="text-base font-bold text-slate-100">Movimenti per Conto</h3>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {/* Filter Method Tabs */}
-            <div className="flex items-center bg-[#090D16] p-1 rounded-xl border border-slate-800 text-xs">
+            <div className="flex items-center bg-[#090D16] p-1 rounded-xl border border-slate-800 text-xs flex-wrap">
               <button
                 onClick={() => setActiveAccountTab('all')}
                 className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer ${
-                  activeAccountTab === 'all'
-                    ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30'
-                    : 'text-slate-400 hover:text-slate-200'
+                  activeAccountTab === 'all' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 Tutti ({transactions.length})
               </button>
-              <button
-                onClick={() => setActiveAccountTab('main')}
-                className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer ${
-                  activeAccountTab === 'main'
-                    ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Conto Principale ({mainAccountTxCount})
-              </button>
-              <button
-                onClick={() => setActiveAccountTab('prepaid')}
-                className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer ${
-                  activeAccountTab === 'prepaid'
-                    ? 'bg-pink-500/20 text-pink-300 font-bold border border-pink-500/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Carta Prepagata ({prepaidCardTxCount})
-              </button>
+              {accounts.map(a => (
+                <button
+                  key={a.id}
+                  onClick={() => setActiveAccountTab(a.id)}
+                  className={`px-3 py-1 rounded-lg font-medium transition cursor-pointer ${
+                    activeAccountTab === a.id ? `${ACCOUNT_KIND_META[a.kind].badgeBg} ${ACCOUNT_KIND_META[a.kind].badgeText} font-bold border ${ACCOUNT_KIND_META[a.kind].badgeBorder}` : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {a.label} ({txCountByAccount[a.id] ?? 0})
+                </button>
+              ))}
             </div>
 
-            {/* Search Box */}
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -568,7 +466,6 @@ export const AccountsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Transactions Table */}
         <div className="border border-slate-800 rounded-xl overflow-hidden bg-[#090D16]/80">
           <div className="overflow-x-auto max-h-96 custom-scrollbar">
             <table className="w-full text-left text-xs border-collapse">
@@ -577,7 +474,7 @@ export const AccountsView: React.FC = () => {
                   <th className="py-3 px-4">Data</th>
                   <th className="py-3 px-4">Descrizione</th>
                   <th className="py-3 px-4">Categoria</th>
-                  <th className="py-3 px-4">Conto / Metodo</th>
+                  <th className="py-3 px-4">Conto</th>
                   <th className="py-3 px-4">Tipo</th>
                   <th className="py-3 px-4 text-right">Importo</th>
                   <th className="py-3 px-4 text-center">Azioni</th>
@@ -592,18 +489,20 @@ export const AccountsView: React.FC = () => {
                   </tr>
                 ) : (
                   displayTxs.map(tx => {
-                    const isPrepaid = tx.account === 'Carta prepagata' || tx.account === 'Carta' || tx.account === 'Carta di Credito';
+                    const account = accounts.find(a => a.id === tx.accountId);
+                    const meta = account ? ACCOUNT_KIND_META[account.kind] : null;
                     return (
                       <tr key={tx.id} className="hover:bg-slate-800/40 transition">
-                        <td className="py-2.5 px-4 font-mono text-slate-300 whitespace-nowrap">
-                          {formatDateItalian(tx.date)}
-                        </td>
+                        <td className="py-2.5 px-4 font-mono text-slate-300 whitespace-nowrap">{formatDateItalian(tx.date)}</td>
                         <td className="py-2.5 px-4 text-slate-200 font-medium max-w-xs truncate">
                           {tx.description}
                           {tx.notes && <span className="text-[10px] text-slate-400 block truncate">{tx.notes}</span>}
+                          {tx.transferAccountsIncomplete && (
+                            <span className="text-[10px] text-amber-400 block">⚠ destinazione da completare</span>
+                          )}
                         </td>
                         <td className="py-2.5 px-4">
-                          <span 
+                          <span
                             className="px-2 py-0.5 rounded-full text-[10px] font-semibold border"
                             style={{
                               backgroundColor: `${getCategoryColor(tx.category)}15`,
@@ -615,15 +514,15 @@ export const AccountsView: React.FC = () => {
                           </span>
                         </td>
                         <td className="py-2.5 px-4 whitespace-nowrap">
-                          {isPrepaid ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-pink-500/10 text-pink-300 border border-pink-500/30 text-[10px] font-semibold">
-                              <CreditCard className="w-3 h-3" />
-                              <span>Carta prepagata</span>
+                          {meta ? (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md ${meta.badgeBg} ${meta.badgeText} border ${meta.badgeBorder} text-[10px] font-semibold`}>
+                              <meta.icon className="w-3 h-3" />
+                              <span>{account!.label}</span>
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 text-[10px] font-semibold">
-                              <Building2 className="w-3 h-3" />
-                              <span>Conto Principale</span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-700/30 text-slate-400 border border-slate-700 text-[10px] font-semibold">
+                              <HelpCircle className="w-3 h-3" />
+                              <span>Non configurato</span>
                             </span>
                           )}
                         </td>
@@ -641,8 +540,8 @@ export const AccountsView: React.FC = () => {
                           tx.type === 'transfer' ? 'text-sky-300' :
                           'text-rose-400'
                         }`}>
-                          {tx.type === 'income' ? `+${formatCurrency(tx.amount)}` : 
-                           tx.type === 'transfer' ? formatCurrency(tx.amount) : 
+                          {tx.type === 'income' ? `+${formatCurrency(tx.amount)}` :
+                           tx.type === 'transfer' ? formatCurrency(tx.amount) :
                            `-${formatCurrency(tx.amount)}`}
                         </td>
                         <td className="py-2.5 px-4 text-center whitespace-nowrap">
@@ -675,9 +574,10 @@ export const AccountsView: React.FC = () => {
             </table>
           </div>
         </div>
-
       </div>
 
+      <AddAccountModal editAccountId={editAccountId} onCloseEdit={() => setEditAccountId(null)} />
+      <TransferModal />
     </div>
   );
 };
