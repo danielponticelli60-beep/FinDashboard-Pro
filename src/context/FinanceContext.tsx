@@ -1250,7 +1250,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         if (!tx.date.startsWith(filters.year)) return false;
       }
       if (filters.category !== 'all' && tx.category !== filters.category) return false;
-      if (filters.account !== 'all' && tx.account !== filters.account) return false;
+      if (filters.account !== 'all' && tx.accountId !== filters.account) return false;
       if (filters.type !== 'all' && tx.type !== filters.type) return false;
       return true;
     }).length;
@@ -1335,7 +1335,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       }
 
       // 4. Account Filter
-      if (filters.account !== 'all' && tx.account !== filters.account) {
+      if (filters.account !== 'all' && tx.accountId !== filters.account) {
         return false;
       }
 
