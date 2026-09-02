@@ -209,9 +209,10 @@ export type CardDebitMode = 'direct_debit' | 'separate_account' | 'excluded';
 
 // Generic account model (schema v2) — supersedes the fixed MainAccountConfig +
 // PrepaidCardConfig pair below. 2-4 configured accounts, see
-// ACCOUNT_LIMITS in FinanceContext.tsx. 'main_account' and 'prepaid_card' are
-// preserved as stable ids by the v1->v2 migration (utils/schemaMigration.ts)
-// so existing Transaction.accountId references keep resolving.
+// ACCOUNT_LIMITS in utils/accountRules.ts. 'main_account' and 'prepaid_card'
+// are preserved as stable ids by the v1->v2 migration
+// (utils/schemaMigration.ts) so existing Transaction.accountId references
+// keep resolving.
 export type AccountKind =
   | 'checking'      // Conto corrente
   | 'credit_card'   // Carta di credito
@@ -233,6 +234,8 @@ export interface Account {
   controlBalanceDate?: string;
   cardDebitMode?: CardDebitMode;
   linkedMethods?: string[];
+  color?: string; // hex, for visually distinguishing 2-4 accounts in the UI
+  icon?: string; // lucide-react icon name
 }
 
 export interface MainAccountConfig {
