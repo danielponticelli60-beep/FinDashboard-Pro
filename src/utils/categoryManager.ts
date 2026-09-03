@@ -12,7 +12,6 @@ export const CATEGORY_BACKUP_STORAGE_KEY = 'findashboard_category_migration_back
 export const BASE_CATEGORIES: CategoryDefinition[] = [
   // Spese
   { id: 'regali_e_famiglia', label: 'Regali e famiglia', allowedType: 'expense', color: '#EC4899', iconName: 'Gift', isSystem: true },
-  { id: 'svago_e_ristoranti', label: 'Svago e ristoranti', allowedType: 'expense', color: '#F59E0B', iconName: 'Utensils', isSystem: true },
   { id: 'salute_e_benessere', label: 'Salute e benessere', allowedType: 'expense', color: '#06B6D4', iconName: 'HeartPulse', isSystem: true },
   { id: 'casa_e_utenze', label: 'Casa & Utenze', allowedType: 'expense', color: '#38BDF8', iconName: 'Home', isSystem: true },
   { id: 'alimentari_e_spesa', label: 'Alimentari & Spesa', allowedType: 'expense', color: '#EAB308', iconName: 'ShoppingCart', isSystem: true },

@@ -7,7 +7,8 @@ export type AccountType =
   | 'Carta di Credito' 
   | 'Conto Risparmio' 
   | 'Portafoglio Investimenti' 
-  | 'Contanti';
+  | 'Contanti'
+  | 'Da verificare';
 
 export type ExpenseCategory = 
   | 'Casa & Utenze'
@@ -112,7 +113,22 @@ export interface Transaction {
   categoryLabel?: string; // Canonical original text label
   rawCategory?: string; // Raw input string from Excel or manual input
   subcategory?: string;
-  account: AccountType;
+
+  // Structured Account Model
+  accountId?: string; // Canonical account identifier (e.g. 'main_account', 'prepaid_card', 'cash_account', 'to_verify')
+  accountLabel?: string; // Display label
+  paymentMethod?: string; // Historic or specific payment method text
+  account: AccountType; // Backward compatible account enum
+
+  // Transfer accounts
+  fromAccountId?: string;
+  toAccountId?: string;
+  // Set by the v1->v2 schema migration on transfer-type transactions that are
+  // missing fromAccountId/toAccountId (e.g. imported from Excel without a
+  // resolvable destination account) — never inferred automatically, flagged
+  // for manual completion in Diagnostics instead.
+  transferAccountsIncomplete?: boolean;
+
   status: 'completed' | 'pending';
   notes?: string;
   tags?: string[];
@@ -137,7 +153,7 @@ export interface ToVerifyRow {
   account: string;
   category: string;
   source?: string;
-  rawAmount?: any;
+  rawAmount?: number | string;
   originalSignedAmount?: number | null;
   reason: string;
   currentType: TransactionType;
@@ -191,58 +207,99 @@ export type ActivePage = 'dashboard' | 'transactions' | 'accounts' | 'allocation
 
 export type CardDebitMode = 'direct_debit' | 'separate_account' | 'excluded';
 
-export interface MainAccountConfig {
-  initialBalance: number; // e.g. 3400.00
+// Generic account model (schema v2) — supersedes the fixed MainAccountConfig +
+// PrepaidCardConfig pair below. 2-4 configured accounts, see
+// ACCOUNT_LIMITS in utils/accountRules.ts. 'main_account' and 'prepaid_card'
+// are preserved as stable ids by the v1->v2 migration
+// (utils/schemaMigration.ts) so existing Transaction.accountId references
+// keep resolving.
+export type AccountKind =
+  | 'checking'      // Conto corrente
+  | 'credit_card'   // Carta di credito
+  | 'prepaid_card'  // Carta prepagata (kept distinct from credit_card - existing real data uses this)
+  | 'cash'          // Contanti
+  | 'savings'       // Risparmio
+  | 'investment'    // Investimenti
+  | 'other';        // Altro
+
+export interface Account {
+  id: string;
+  kind: AccountKind;
+  label: string;
+  initialBalance: number;
   initialDate: string; // YYYY-MM-DD
+  maskedNumber?: string;
+  isConfigured: boolean;
+  controlBalance?: number;
+  controlBalanceDate?: string;
+  cardDebitMode?: CardDebitMode;
+  linkedMethods?: string[];
+  color?: string; // hex, for visually distinguishing 2-4 accounts in the UI
+  icon?: string; // lucide-react icon name
+}
+
+export interface MainAccountConfig {
+  id?: string; // 'main_account'
+  initialBalance: number; // 3075.00 (opening operational balance at 2026-08-16)
+  initialDate: string; // YYYY-MM-DD (e.g. '2026-08-16')
   accountLabel?: string; // e.g. "Conto Corrente Principale"
   maskedNumber?: string; // e.g. "••••4829" (only masked last 4 digits)
   isConfigured: boolean;
-  controlBalance?: number; // Manual control/reconciliation balance (e.g. 3075.00)
+  controlBalance?: number; // Optional legacy compatibility
   controlBalanceDate?: string; // Date of the statement balance
-  cardDebitMode?: CardDebitMode; // 'direct_debit' | 'separate_account' | 'excluded'
-  linkedMethods?: string[]; // e.g. ['Carta']
+  cardDebitMode?: CardDebitMode; // 'separate_account'
+  linkedMethods?: string[]; // e.g. ['Carta prepagata']
 }
 
 export interface PrepaidCardConfig {
-  initialBalance: number; // 0.00 at 01/07/2026
-  initialDate: string; // YYYY-MM-DD (e.g. '2026-07-01')
-  controlBalance: number; // 58.68 or calculated
-  controlBalanceDate?: string;
+  id?: string; // 'prepaid_card'
+  initialBalance: number; // 54.68 (opening operational balance)
+  initialDate: string; // YYYY-MM-DD (e.g. '2026-08-16')
   accountLabel: string; // 'Carta prepagata'
   maskedNumber?: string;
   isConfigured: boolean;
+  controlBalance?: number; // Optional legacy compatibility
+  controlBalanceDate?: string;
 }
 
 export interface PrepaidAccountSummary {
   config: PrepaidCardConfig;
-  initialBalance: number;
+  initialBalance: number; // 54.68
   initialDate: string;
-  rechargesIn: number; // 425.00
-  rechargesCount: number; // 3
-  cardExpenses: number; // 928.00
-  cardExpensesCount: number; // 18
-  currentBalance: number; // 0.00 + 425.00 - 928.00 = -503.00 (or reconciled)
-  controlBalance: number; // 58.68
+  rechargesIn: number;
+  rechargesCount: number;
+  cardExpenses: number;
+  cardExpensesCount: number;
+  currentBalance: number; // 54.68 + recharges - expenses
+  totalIncome?: number;
+  totalExpenses?: number;
+  expensesCount?: number;
+  totalRecharges?: number;
+  controlBalance?: number;
   controlBalanceDate?: string;
-  reconciliationDelta: number; // 0.00
-  isReconciled: boolean;
+  reconciliationDelta?: number;
+  isReconciled?: boolean;
+  periodRecharges?: number;
+  periodRechargesCount?: number;
+  periodExpenses?: number;
+  periodExpensesCount?: number;
   runningHistory: {
     date: string;
     description: string;
     amount: number;
     type: TransactionType;
     balance: number;
-    account: string;
+    account?: string;
   }[];
 }
 
 export interface OverallLiquiditySummary {
   mainAccountBalance: number; // 3075.00
-  prepaidCardBalance: number; // 58.68
-  totalLiquidity: number; // 3133.68
-  totalControlBalance: number; // 3133.68
-  totalDelta: number; // 0.00
-  isReconciled: boolean;
+  prepaidCardBalance: number; // 54.68
+  totalLiquidity: number; // 3129.68
+  totalControlBalance?: number;
+  totalDelta?: number;
+  isReconciled?: boolean;
 }
 
 export interface ImportBatch {
@@ -382,8 +439,12 @@ export interface BackupData {
   exportDate?: string; // backward compat
   version?: string; // backward compat
   transactions: Transaction[];
+  // Schema v1 (legacy): fixed pair. Schema v2: generic `accounts` list.
+  // Both are optional here because a v1 backup has the former, a v2 backup
+  // has the latter — utils/schemaMigration.ts converts v1 -> v2.
   mainAccountConfig?: MainAccountConfig;
   prepaidCardConfig?: PrepaidCardConfig;
+  accounts?: Account[];
   categories?: {
     expense: ExpenseCategory[];
     income: IncomeCategory[];
@@ -397,7 +458,7 @@ export interface BackupData {
   wealthAssets?: WealthItem[];
   wealthItems?: WealthItem[]; // alias for compatibility
   financialGoals?: FinancialGoal[];
-  importPresets?: any[];
+  importPresets?: unknown[]; // MappingPreset[] from utils/excelParser.ts, kept opaque here to avoid a types.ts -> utils import cycle
   preferences?: BackupPreferences;
   auditLogs?: AuditLogEntry[];
 }

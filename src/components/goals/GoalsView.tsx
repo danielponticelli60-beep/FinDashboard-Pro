@@ -234,7 +234,7 @@ export const GoalsView: React.FC = () => {
 
       {/* Category Filter Pills */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-        {[
+        {([
           { id: 'all', label: 'Tutti gli Obiettivi' },
           { id: 'emergency', label: 'Fondo Emergenza' },
           { id: 'house', label: 'Casa & Arredo' },
@@ -242,10 +242,10 @@ export const GoalsView: React.FC = () => {
           { id: 'investment', label: 'Investimenti & FIRE' },
           { id: 'vehicle', label: 'Auto & Mobilità' },
           { id: 'other', label: 'Altri Traguardi' },
-        ].map(cat => (
+        ] as { id: 'all' | FinancialGoal['category']; label: string }[]).map(cat => (
           <button
             key={cat.id}
-            onClick={() => setActiveCategoryFilter(cat.id as any)}
+            onClick={() => setActiveCategoryFilter(cat.id)}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer border ${
               activeCategoryFilter === cat.id
                 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'

@@ -33,16 +33,8 @@ const ALL_CATEGORIES = [
   'Giroconto / Trasferimento'
 ];
 
-const ALL_ACCOUNTS = [
-  'Conto Principale',
-  'Carta di Credito',
-  'Conto Risparmio',
-  'Portafoglio Investimenti',
-  'Contanti'
-];
-
 export const GlobalFiltersBar: React.FC = () => {
-  const { filters, updateFilter, resetFilters, filteredTransactions, transactions, categoryCatalog } = useFinance();
+  const { filters, updateFilter, resetFilters, filteredTransactions, transactions, categoryCatalog, accounts } = useFinance();
 
   // Count active non-default filters
   const activeFiltersCount = [
@@ -180,8 +172,8 @@ export const GlobalFiltersBar: React.FC = () => {
                 className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer"
               >
                 <option value="all" className="bg-[#131F37]">Tutti i conti</option>
-                {ALL_ACCOUNTS.map(acc => (
-                  <option key={acc} value={acc} className="bg-[#131F37]">{acc}</option>
+                {accounts.map(acc => (
+                  <option key={acc.id} value={acc.id} className="bg-[#131F37]">{acc.label}</option>
                 ))}
               </select>
             </div>
@@ -251,7 +243,7 @@ export const GlobalFiltersBar: React.FC = () => {
             )}
             {filters.account !== 'all' && (
               <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                Conto: {filters.account}
+                Conto: {accounts.find(a => a.id === filters.account)?.label || filters.account}
               </span>
             )}
             {filters.type !== 'all' && (

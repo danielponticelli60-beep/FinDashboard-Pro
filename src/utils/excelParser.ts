@@ -57,7 +57,7 @@ export type RowValidationStatus = 'valid' | 'duplicate' | 'to_fix' | 'discarded'
 export interface ValidatedRowResult {
   rowNumber: number; // 1-based row number in sheet
   id: string; // Deterministic ID or preview ID
-  rawValues: any[];
+  rawValues: unknown[];
   trace: ConversionTrace;
   status: RowValidationStatus;
   statusReasons: string[];
@@ -71,7 +71,7 @@ export interface RawSheetInspection {
   availableSheets: string[];
   totalRows: number;
   totalCols: number;
-  rawGrid: any[][]; // 2D array of raw cell strings
+  rawGrid: unknown[][]; // 2D array of raw cell values from the worksheet
   headerRowIndex: number; // 0-based index in rawGrid (e.g. 0 for row 1)
   detectedHeaders: ColumnHeaderInfo[];
   distinctTypeValues: string[];
@@ -242,7 +242,7 @@ export const inspectRawWorksheet = (
   headerRowIndex = 0
 ): RawSheetInspection => {
   // Read worksheet as 2D raw array with defval: ''
-  const rawGrid: any[][] = XLSX.utils.sheet_to_json(worksheet, {
+  const rawGrid: unknown[][] = XLSX.utils.sheet_to_json(worksheet, {
     header: 1,
     defval: '',
     raw: false,
@@ -320,7 +320,7 @@ export const inspectRawWorksheet = (
 };
 
 // 2. Controlled Date Parsing
-export const parseItalianDateControlled = (val: any): { date: string | null; rule: string; error?: string } => {
+export const parseItalianDateControlled = (val: unknown): { date: string | null; rule: string; error?: string } => {
   if (val === null || val === undefined || String(val).trim() === '') {
     return { date: null, rule: 'Valore vuoto', error: 'Data assente' };
   }
@@ -384,7 +384,7 @@ export const parseItalianDateControlled = (val: any): { date: string | null; rul
 };
 
 // 3. Controlled Amount Parsing
-export const parseItalianAmountControlled = (val: any): { amount: number | null; isNegative: boolean; rule: string; error?: string } => {
+export const parseItalianAmountControlled = (val: unknown): { amount: number | null; isNegative: boolean; rule: string; error?: string } => {
   if (val === null || val === undefined || String(val).trim() === '') {
     return { amount: null, isNegative: false, rule: 'Valore vuoto', error: 'Importo assente' };
   }
@@ -444,7 +444,7 @@ export const parseItalianAmountControlled = (val: any): { amount: number | null;
 
 // 4. Controlled Type Parsing
 export const parseTransactionTypeControlled = (
-  rawType: any,
+  rawType: unknown,
   amountIsNegative: boolean,
   typeVariants: Record<string, 'income' | 'expense' | 'transfer'> = {}
 ): { type: TransactionType | null; rule: string; error?: string } => {
@@ -484,6 +484,107 @@ export const parseTransactionTypeControlled = (
     type: null,
     rule: `Valore non riconosciuto ("${rawType}")`,
     error: `Valore "${rawType}" non mappato a Entrata, Uscita o Giroconto`,
+  };
+};
+
+// 4b. Controlled Account Normalization
+export interface CanonicalAccountResult {
+  accountId: string;
+  accountLabel: string;
+  account: AccountType;
+  paymentMethod?: string;
+  rule: string;
+}
+
+export const normalizeCanonicalAccount = (
+  rawAccount: unknown,
+  assignEmptyToMainAccount = true
+): CanonicalAccountResult => {
+  if (rawAccount === null || rawAccount === undefined || String(rawAccount).trim() === '') {
+    if (assignEmptyToMainAccount) {
+      return {
+        accountId: 'main_account',
+        accountLabel: 'Conto Principale',
+        account: 'Conto Principale',
+        paymentMethod: 'Conto Principale',
+        rule: 'Valore vuoto → Assegnato Conto Principale (default)',
+      };
+    }
+    return {
+      accountId: 'to_verify',
+      accountLabel: 'Da verificare',
+      account: 'Da verificare',
+      rule: 'Valore assente → Da verificare',
+    };
+  }
+
+  const rawStr = String(rawAccount).trim();
+  const clean = rawStr.toLowerCase();
+
+  // Conto Principale mappings
+  if (
+    clean === 'conto principale' ||
+    clean === 'conto' ||
+    clean === 'conto corrente' ||
+    clean === 'main' ||
+    clean === 'main account' ||
+    clean === 'c/c'
+  ) {
+    return {
+      accountId: 'main_account',
+      accountLabel: 'Conto Principale',
+      account: 'Conto Principale',
+      paymentMethod: rawStr,
+      rule: `Normalizzato "${rawAccount}" → Conto Principale`,
+    };
+  }
+
+  // Prepaid Card / Carta mappings
+  if (
+    clean === 'carta prepagata' ||
+    clean === 'carta' ||
+    clean === 'carta di credito' ||
+    clean === 'prepaid' ||
+    clean === 'credit card' ||
+    clean === 'prepagata'
+  ) {
+    return {
+      accountId: 'prepaid_card',
+      accountLabel: 'Carta prepagata',
+      account: 'Carta prepagata',
+      paymentMethod: rawStr,
+      rule: `Normalizzato "${rawAccount}" → Carta prepagata`,
+    };
+  }
+
+  // Cash / Contanti mappings
+  if (clean === 'contanti' || clean === 'cash' || clean === 'contante') {
+    return {
+      accountId: 'cash_account',
+      accountLabel: 'Contanti',
+      account: 'Contanti',
+      paymentMethod: rawStr,
+      rule: `Normalizzato "${rawAccount}" → Contanti`,
+    };
+  }
+
+  // Da verificare mappings
+  if (clean === 'da verificare' || clean === 'non riconciliato' || clean === 'da_verificare') {
+    return {
+      accountId: 'to_verify',
+      accountLabel: 'Da verificare',
+      account: 'Da verificare',
+      paymentMethod: rawStr,
+      rule: `Normalizzato "${rawAccount}" → Da verificare`,
+    };
+  }
+
+  return {
+    accountId: 'to_verify',
+    accountLabel: rawStr,
+    account: 'Da verificare',
+    paymentMethod: rawStr,
+    rule: 'Testo originale conservato',
   };
 };
 
@@ -588,6 +689,42 @@ export const parseWorksheetAssisted = (
     const rawAccount = mapping.accountColIndex !== null ? rowValues[mapping.accountColIndex] : '';
     const rawRunningBal = mapping.runningBalanceColIndex !== null ? rowValues[mapping.runningBalanceColIndex] : '';
 
+    // Ignore rows where both date and amount are empty (e.g. empty card placeholder lines)
+    if (
+      (rawDate === undefined || rawDate === null || String(rawDate).trim() === '') &&
+      (rawAmount === undefined || rawAmount === null || String(rawAmount).trim() === '')
+    ) {
+      const emptyDiscarded: ValidatedRowResult = {
+        rowNumber,
+        id: `empty-data-row-${rowNumber}`,
+        rawValues: rowValues,
+        trace: {
+          originalDate: String(rawDate || ''),
+          convertedDate: null,
+          dateRule: 'Data e importo assenti',
+          originalType: String(rawType || ''),
+          convertedType: null,
+          typeRule: 'Esclusione riga senza dati',
+          originalAmount: String(rawAmount || ''),
+          convertedAmount: null,
+          amountRule: 'Importo assente',
+          originalCategory: String(rawCategory || ''),
+          convertedCategory: '',
+          categoryRule: 'Invariata',
+          originalDescription: String(rawDesc || ''),
+          convertedDescription: '',
+          originalAccount: String(rawAccount || ''),
+          convertedAccount: '',
+          accountRule: 'Nessuna',
+        },
+        status: 'discarded',
+        statusReasons: ['Riga senza data né importo ignorata'],
+      };
+      discardedRows.push(emptyDiscarded);
+      allRows.push(emptyDiscarded);
+      continue;
+    }
+
     // Check if summary row (Totale, Somma, Riepilogo)
     const combinedText = `${rawDate} ${rawType} ${rawCategory} ${rawDesc}`.toLowerCase();
     if (
@@ -633,24 +770,24 @@ export const parseWorksheetAssisted = (
     const amountParsed = parseItalianAmountControlled(rawAmount);
     const typeParsed = parseTransactionTypeControlled(rawType, amountParsed.isNegative, mapping.typeVariants);
 
-    // Exact text preservation for Category (CRITICAL requirement: NO NORMALIZATION / NO INVENTIONS)
+    // Exact text preservation for Category
     const exactCategory = String(rawCategory || '').trim() || (typeParsed.type === 'income' ? 'Altre Entrate' : 'Altro Spese');
     const categoryRule = 'Testo originale conservato esattamente senza normalizzazione';
 
     // Exact text preservation for Description
     const exactDesc = String(rawDesc || '').trim() || (typeParsed.type === 'income' ? 'Entrata da file' : 'Spesa da file');
 
-    // Conto / Metodo preservation & empty assignment logic
-    let exactAccount: string = String(rawAccount || '').trim();
-    let accountRule = 'Testo originale conservato';
-    if (!exactAccount) {
-      if (mapping.assignEmptyToMainAccount) {
-        exactAccount = 'Conto Principale';
-        accountRule = 'Valore vuoto → Assegnato Conto Principale (previa conferma utente)';
-      } else {
-        exactAccount = 'Non specificato';
-        accountRule = 'Valore assente';
-      }
+    // Canonical Account Normalization (Conto principale, Carta di credito, Contanti)
+    const accountNorm = normalizeCanonicalAccount(rawAccount, mapping.assignEmptyToMainAccount);
+    const exactAccount = accountNorm.account;
+    const accountRule = accountNorm.rule;
+
+    // Automatic recharge/transfer detection if description contains ricarica
+    let finalType = typeParsed.type;
+    let typeRule = typeParsed.rule;
+    if (exactDesc.toLowerCase().includes('ricarica') && (exactDesc.toLowerCase().includes('carta') || exactAccount === 'Carta prepagata' || exactAccount === 'Conto Principale')) {
+      finalType = 'transfer';
+      typeRule = 'Riconosciuto Giroconto / Ricarica Carta';
     }
 
     const trace: ConversionTrace = {
@@ -660,8 +797,8 @@ export const parseWorksheetAssisted = (
       dateError: dateParsed.error,
 
       originalType: String(rawType || ''),
-      convertedType: typeParsed.type,
-      typeRule: typeParsed.rule,
+      convertedType: finalType,
+      typeRule,
       typeError: typeParsed.error,
 
       originalAmount: String(rawAmount || ''),
@@ -705,9 +842,9 @@ export const parseWorksheetAssisted = (
 
     // Check Duplicates
     const finalDate = dateParsed.date!;
-    const finalType = typeParsed.type!;
+    const safeFinalType = finalType!;
     const finalAmount = amountParsed.amount!;
-    const dupKey = makeDuplicateKey(finalDate, finalType, finalAmount, exactDesc, exactAccount);
+    const dupKey = makeDuplicateKey(finalDate, safeFinalType, finalAmount, exactDesc, exactAccount);
 
     if (existingDupSet.has(dupKey)) {
       const dupRow: ValidatedRowResult = {
@@ -760,7 +897,12 @@ export const parseWorksheetAssisted = (
       rawCategory: catRaw || undefined,
       subcategory: undefined,
       description: exactDesc,
-      account: exactAccount as AccountType,
+      accountId: finalType === 'transfer' ? 'main_account' : accountNorm.accountId,
+      accountLabel: accountNorm.accountLabel,
+      account: accountNorm.account,
+      paymentMethod: accountNorm.paymentMethod,
+      fromAccountId: finalType === 'transfer' ? 'main_account' : undefined,
+      toAccountId: finalType === 'transfer' ? 'prepaid_card' : undefined,
       status: 'completed',
       notes: `Importato da foglio "${inspection.sheetName}" (riga ${rowNumber})`,
       source: 'Excel personale',

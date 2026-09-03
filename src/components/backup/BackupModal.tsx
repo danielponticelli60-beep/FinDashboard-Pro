@@ -46,7 +46,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
         const text = event.target?.result as string;
         const result = importFullBackupJSON(text);
         setImportStatus(result);
-      } catch (err: any) {
+      } catch {
         setImportStatus({
           success: false,
           message: 'Impossibile leggere il file selezionato.',

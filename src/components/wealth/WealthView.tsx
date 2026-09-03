@@ -423,16 +423,16 @@ export const WealthView: React.FC = () => {
           
           {/* Tabs */}
           <div className="flex items-center gap-1 bg-[#090D16] p-1 rounded-xl border border-slate-800 text-xs">
-            {[
+            {([
               { id: 'all', label: 'Tutti gli Asset', count: wealthItems.length },
               { id: 'liquidity', label: 'Liquidità', count: wealthItems.filter(w => w.type === 'liquidity').length },
               { id: 'investment', label: 'Investimenti', count: wealthItems.filter(w => w.type === 'investment').length },
               { id: 'asset', label: 'Immobili & Beni', count: wealthItems.filter(w => w.type === 'asset').length },
               { id: 'liability', label: 'Debiti & Mutui', count: wealthItems.filter(w => w.type === 'liability').length },
-            ].map(tab => (
+            ] as { id: 'all' | WealthType; label: string; count: number }[]).map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => setActiveTab(tab.id)}
                 className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1.5 ${
                   activeTab === tab.id
                     ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'

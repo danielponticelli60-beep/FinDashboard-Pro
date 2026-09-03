@@ -43,7 +43,7 @@ import {
   getColumnLetter,
   ValidatedRowResult
 } from '../../utils/excelParser';
-import { formatCurrency, formatDateItalian, getCategoryColor } from '../../utils/formatters';
+import { formatCurrency, formatDateItalian, getCategoryColor, getErrorMessage } from '../../utils/formatters';
 import { TransactionType } from '../../types';
 
 export const ExcelImportModal: React.FC = () => {
@@ -200,8 +200,8 @@ export const ExcelImportModal: React.FC = () => {
         setSelectedSheetName('');
         setHeaderRowIndex(0);
         setActiveTab('raw');
-      } catch (err: any) {
-        alert('Errore durante la lettura del file Excel: ' + (err.message || 'File non supportato'));
+      } catch (err) {
+        alert('Errore durante la lettura del file Excel: ' + getErrorMessage(err, 'File non supportato'));
       } finally {
         setIsProcessing(false);
       }

@@ -158,7 +158,7 @@ export const FinancialGoalModal: React.FC<FinancialGoalModalProps> = ({
               <label className="block text-xs font-semibold text-slate-300 mb-1">Categoria Obiettivo</label>
               <select
                 value={category}
-                onChange={e => handleCategoryChange(e.target.value as any)}
+                onChange={e => handleCategoryChange(e.target.value as FinancialGoal['category'])}
                 className="w-full bg-[#0D1527] border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400"
               >
                 {GOAL_CATEGORIES.map(c => (
@@ -171,7 +171,7 @@ export const FinancialGoalModal: React.FC<FinancialGoalModalProps> = ({
               <label className="block text-xs font-semibold text-slate-300 mb-1">Priorità</label>
               <select
                 value={priority}
-                onChange={e => setPriority(e.target.value as any)}
+                onChange={e => setPriority(e.target.value as FinancialGoal['priority'])}
                 className="w-full bg-[#0D1527] border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400"
               >
                 <option value="high">Alta Priorità 🔴</option>
