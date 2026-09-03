@@ -1,21 +1,24 @@
 import * as XLSX from 'xlsx';
-import { 
-  BackupData, 
-  Transaction, 
-  MainAccountConfig, 
+import {
+  BackupData,
+  Transaction,
+  MainAccountConfig,
   PrepaidCardConfig,
-  AllocationPlan, 
-  WealthItem, 
-  FinancialGoal, 
-  AuditLogEntry, 
+  Account,
+  AllocationPlan,
+  WealthItem,
+  FinancialGoal,
+  AuditLogEntry,
   IntegrityCheckResult,
   ExpenseCategory,
   IncomeCategory
 } from '../types';
 import { loadSavedPresets } from './excelParser';
+import { getErrorMessage } from './formatters';
+import { SCHEMA_V2 } from './schemaMigration';
 
 export const APP_VERSION = '1.2.0';
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = SCHEMA_V2;
 export const LAST_BACKUP_STORAGE_KEY = 'findashboard_last_backup_date';
 
 const DEFAULT_EXPENSE_CATEGORIES: ExpenseCategory[] = [
@@ -96,6 +99,7 @@ export function triggerFileDownload(blob: Blob, filename: string): void {
  */
 export function buildBackupPayload(params: {
   transactions: Transaction[];
+  accounts: Account[];
   mainAccountConfig: MainAccountConfig;
   prepaidCardConfig?: PrepaidCardConfig;
   allocationPlan: AllocationPlan;
@@ -113,6 +117,9 @@ export function buildBackupPayload(params: {
     exportDate: now,
     version: APP_VERSION,
     transactions: params.transactions,
+    accounts: params.accounts,
+    // Kept for compatibility with anything still reading the old fixed pair
+    // (e.g. the restore-preview UI in SettingsView) - derived from `accounts`.
     mainAccountConfig: params.mainAccountConfig,
     prepaidCardConfig: params.prepaidCardConfig,
     categories: {
@@ -144,6 +151,7 @@ export function buildBackupPayload(params: {
  */
 export function exportFullBackupJSON(params: {
   transactions: Transaction[];
+  accounts: Account[];
   mainAccountConfig: MainAccountConfig;
   prepaidCardConfig?: PrepaidCardConfig;
   allocationPlan: AllocationPlan;
@@ -191,7 +199,7 @@ export function exportTransactionsCSV(transactions: Transaction[]): { filename: 
     'Note'
   ];
 
-  const escapeCSV = (val: any) => {
+  const escapeCSV = (val: unknown) => {
     if (val === undefined || val === null) return '';
     const str = String(val);
     if (str.includes(';') || str.includes('"') || str.includes('\n')) {
@@ -393,6 +401,7 @@ export function exportExcelWorkbook(params: {
 export function performIntegrityCheck(params: {
   transactions: Transaction[];
   mainAccountConfig?: MainAccountConfig;
+  prepaidCardConfig?: PrepaidCardConfig;
   allocationPlan?: AllocationPlan;
   wealthItems?: WealthItem[];
   financialGoals?: FinancialGoal[];
@@ -402,6 +411,7 @@ export function performIntegrityCheck(params: {
   const { 
     transactions = [], 
     mainAccountConfig, 
+    prepaidCardConfig,
     allocationPlan, 
     wealthItems = [], 
     financialGoals = [], 
@@ -414,6 +424,13 @@ export function performIntegrityCheck(params: {
   let incomeCount = 0;
   let expenseCount = 0;
   let transferCount = 0;
+
+  // Account-specific aggregations
+  let mainIncome = 0;
+  let mainExpenses = 0;
+  let mainTransfersOut = 0;
+  let cardExpenses = 0;
+  let cardRechargesIn = 0;
 
   // 1. Transaction integrity checks
   const txIds = new Set<string>();
@@ -433,7 +450,8 @@ export function performIntegrityCheck(params: {
       invalidDateCount++;
     }
 
-    if (typeof tx.amount !== 'number' || isNaN(tx.amount) || tx.amount <= 0) {
+    const amt = typeof tx.amount === 'number' && !isNaN(tx.amount) ? tx.amount : 0;
+    if (amt <= 0) {
       invalidAmountCount++;
     }
 
@@ -441,15 +459,32 @@ export function performIntegrityCheck(params: {
       missingCategoryCount++;
     }
 
+    const cleanAcc = (tx.account || '').trim().toLowerCase();
+    const isPrepaid = cleanAcc === 'carta prepagata' || cleanAcc === 'carta' || cleanAcc === 'carta di credito' || cleanAcc.includes('carta');
+    const isMain = cleanAcc === 'conto principale' || cleanAcc === 'conto' || cleanAcc === 'main' || cleanAcc === '' || !tx.account;
+
     if (tx.type === 'income') {
-      totalIncome += tx.amount || 0;
+      totalIncome += amt;
       incomeCount++;
+      if (isMain) {
+        mainIncome += amt;
+      }
     } else if (tx.type === 'expense') {
-      totalExpense += tx.amount || 0;
+      totalExpense += amt;
       expenseCount++;
+      if (isPrepaid) {
+        cardExpenses += amt;
+      } else if (isMain) {
+        mainExpenses += amt;
+      }
     } else if (tx.type === 'transfer') {
-      totalTransfers += tx.amount || 0;
+      totalTransfers += amt;
       transferCount++;
+      const desc = (tx.description + ' ' + (tx.subcategory || '')).toLowerCase();
+      if (isMain || desc.includes('carta') || desc.includes('ricarica')) {
+        mainTransfersOut += amt;
+        cardRechargesIn += amt;
+      }
     }
   });
 
@@ -529,9 +564,9 @@ export function performIntegrityCheck(params: {
     });
   }
 
-  // 2. Main account reconciliation check
+  // 2. Main account reconciliation check (Conto Principale)
   const initBal = mainAccountConfig?.initialBalance || 0;
-  const calcBal = Math.round((initBal + totalIncome - totalExpense) * 100) / 100;
+  const calcBal = Math.round((initBal + mainIncome - mainTransfersOut - mainExpenses) * 100) / 100;
   const controlBal = mainAccountConfig?.controlBalance;
   
   if (controlBal !== undefined && controlBal !== null) {
@@ -562,6 +597,32 @@ export function performIntegrityCheck(params: {
       status: 'pass',
       message: `Saldo calcolato: ${calcBal.toFixed(2)} € (Saldo iniziale: ${initBal.toFixed(2)} €).`,
     });
+  }
+
+  // 2b. Carta Prepagata reconciliation check
+  if (prepaidCardConfig) {
+    const initPrepaid = prepaidCardConfig.initialBalance || 0;
+    const calcPrepaid = Math.round((initPrepaid + cardRechargesIn - cardExpenses) * 100) / 100;
+    const controlPrepaid = prepaidCardConfig.controlBalance;
+    const deltaPrepaid = controlPrepaid !== undefined ? Math.abs(controlPrepaid - calcPrepaid) : 0;
+    
+    if (controlPrepaid !== undefined && deltaPrepaid < 0.01) {
+      checks.push({
+        id: 'prepaid_reconciliation',
+        label: 'Riconciliazione Carta Prepagata',
+        category: 'financial',
+        status: 'pass',
+        message: `Saldo carta calcolato (${calcPrepaid.toFixed(2)} €) coincide con il saldo di controllo (${controlPrepaid.toFixed(2)} €). Delta: 0,00 €.`,
+      });
+    } else if (controlPrepaid !== undefined) {
+      checks.push({
+        id: 'prepaid_reconciliation',
+        label: 'Riconciliazione Carta Prepagata',
+        category: 'financial',
+        status: 'warn',
+        message: `Saldo carta calcolato: ${calcPrepaid.toFixed(2)} € vs Controllo: ${controlPrepaid.toFixed(2)} € (Delta: ${deltaPrepaid.toFixed(2)} €).`,
+      });
+    }
   }
 
   // 3. Allocation plan checks
@@ -715,10 +776,10 @@ export function parseAndPreviewBackupJSON(jsonString: string): {
       backup: backupData,
       integrity,
     };
-  } catch (err: any) {
+  } catch (err) {
     return {
       isValid: false,
-      error: `Errore nella lettura del JSON: ${err.message || 'Sintassi non valida'}`,
+      error: `Errore nella lettura del JSON: ${getErrorMessage(err, 'Sintassi non valida')}`,
     };
   }
 }

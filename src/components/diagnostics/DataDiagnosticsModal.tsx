@@ -1,46 +1,55 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  X, 
-  Database, 
-  AlertTriangle, 
-  Trash2, 
-  Search, 
-  FileSpreadsheet, 
-  UserCheck, 
-  History, 
-  ShieldCheck, 
+import {
+  X,
+  Database,
+  AlertTriangle,
+  Trash2,
+  Search,
+  FileSpreadsheet,
+  UserCheck,
+  History,
+  ShieldCheck,
   RotateCcw,
   CheckCircle2,
   Clock,
   Filter,
   Layers,
   ArrowUpDown,
-  Tag
+  Tag,
+  ArrowLeftRight
 } from 'lucide-react';
 import { useFinance } from '../../context/FinanceContext';
 import { Transaction } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 
 export const DataDiagnosticsModal: React.FC = () => {
-  const { 
-    isDiagnosticsModalOpen, 
-    closeDiagnosticsModal, 
-    transactions, 
-    diagnosticReport, 
-    auditLog, 
+  const {
+    isDiagnosticsModalOpen,
+    closeDiagnosticsModal,
+    transactions,
+    diagnosticReport,
+    auditLog,
     deleteTransaction,
     openResetPersonalModal,
     resetPersonalData,
     lastImportBatch,
     undoLastImport,
     categoryDiagnostics,
-    openCategoryMigrationModal
+    openCategoryMigrationModal,
+    accounts,
+    completeIncompleteTransfer
   } = useFinance();
 
   const [searchFilter, setSearchFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'Excel personale' | 'Manuale' | 'Demo'>('all');
-  const [activeTab, setActiveTab] = useState<'records' | 'categories' | 'sessions' | 'audit'>('records');
+  const [activeTab, setActiveTab] = useState<'records' | 'categories' | 'transfers' | 'sessions' | 'audit'>('records');
   const [notification, setNotification] = useState<string | null>(null);
+  const [transferPicks, setTransferPicks] = useState<Record<string, { from: string; to: string }>>({});
+
+  const incompleteTransfers = useMemo(
+    () => transactions.filter(t => t.transferAccountsIncomplete),
+    [transactions]
+  );
 
   const filteredRecords = useMemo(() => {
     return transactions.filter(t => {
@@ -210,6 +219,18 @@ export const DataDiagnosticsModal: React.FC = () => {
               Verifica Categorie ({categoryDiagnostics.totalCategoriesCount})
             </button>
             <button
+              onClick={() => setActiveTab('transfers')}
+              className={`py-3 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'transfers'
+                  ? 'border-amber-500 text-amber-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+              id="tab-diagnostic-transfers"
+            >
+              <ArrowLeftRight className="w-4 h-4" />
+              Trasferimenti Incompleti ({incompleteTransfers.length})
+            </button>
+            <button
               onClick={() => setActiveTab('sessions')}
               className={`py-3 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'sessions'
@@ -372,6 +393,68 @@ export const DataDiagnosticsModal: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab: Incomplete Transfers */}
+        {activeTab === 'transfers' && (
+          <div className="p-6 flex-1 overflow-y-auto space-y-4">
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <span>
+                Questi movimenti sono trasferimenti (es. importati da Excel) senza un conto di destinazione noto. Non sono stati assegnati automaticamente — scegli tu origine e destinazione per completarli. Finché restano incompleti, non vengono conteggiati nel saldo di nessun conto.
+              </span>
+            </div>
+
+            {incompleteTransfers.length === 0 ? (
+              <div className="py-10 text-center text-slate-500 text-xs">Nessun trasferimento incompleto. 🎉</div>
+            ) : (
+              <div className="space-y-3">
+                {incompleteTransfers.map(tx => {
+                  const pick = transferPicks[tx.id] || { from: tx.accountId || accounts[0]?.id || '', to: '' };
+                  return (
+                    <div key={tx.id} className="p-4 rounded-xl bg-slate-900 border border-slate-700 space-y-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-semibold text-slate-200">{tx.description}</span>
+                          <span className="text-slate-500 ml-2">{tx.date}</span>
+                        </div>
+                        <span className="font-mono font-bold text-amber-300">{formatCurrency(tx.amount)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <select
+                          value={pick.from}
+                          onChange={e => setTransferPicks(prev => ({ ...prev, [tx.id]: { ...pick, from: e.target.value } }))}
+                          className="px-3 py-1.5 bg-[#090D16] border border-slate-700/80 rounded-lg text-slate-200 text-xs focus:outline-none focus:border-amber-500"
+                        >
+                          {accounts.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                        </select>
+                        <ArrowLeftRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        <select
+                          value={pick.to}
+                          onChange={e => setTransferPicks(prev => ({ ...prev, [tx.id]: { ...pick, to: e.target.value } }))}
+                          className="px-3 py-1.5 bg-[#090D16] border border-slate-700/80 rounded-lg text-slate-200 text-xs focus:outline-none focus:border-amber-500"
+                        >
+                          <option value="">Scegli destinazione...</option>
+                          {accounts.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                        </select>
+                        <button
+                          disabled={!pick.to || pick.to === pick.from}
+                          onClick={() => {
+                            const res = completeIncompleteTransfer(tx.id, pick.from, pick.to);
+                            showToast(res.message);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 disabled:opacity-40 disabled:cursor-not-allowed text-emerald-300 text-xs font-semibold border border-emerald-500/40 transition cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Completa</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

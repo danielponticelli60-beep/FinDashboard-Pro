@@ -229,13 +229,13 @@ export const QuarterlyView: React.FC = () => {
                     return (
                       <div className="bg-[#0B132B]/95 border border-slate-700/80 rounded-xl p-3 shadow-xl text-xs space-y-1.5">
                         <p className="font-bold text-slate-200 border-b border-slate-800 pb-1">{label}</p>
-                        {payload.map((item: any) => (
+                        {payload.map((item) => (
                           <div key={item.name} className="flex justify-between items-center gap-4">
                             <span className="flex items-center gap-1.5" style={{ color: item.color }}>
                               <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
                               {item.name}:
                             </span>
-                            <span className="font-bold text-slate-100">{formatCurrency(item.value)}</span>
+                            <span className="font-bold text-slate-100">{formatCurrency(Number(item.value))}</span>
                           </div>
                         ))}
                       </div>

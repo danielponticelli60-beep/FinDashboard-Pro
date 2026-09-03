@@ -20,7 +20,6 @@ export const AccountConfigModal: React.FC = () => {
     updateMainAccountConfig,
     prepaidCardConfig,
     updatePrepaidCardConfig,
-    prepaidAccountSummary,
     isAccountConfigModalOpen, 
     closeAccountConfigModal,
     isPrepaidConfigModalOpen,
@@ -41,7 +40,6 @@ export const AccountConfigModal: React.FC = () => {
   // Prepaid Card Form state
   const [prepaidInitialBalanceStr, setPrepaidInitialBalanceStr] = useState('');
   const [prepaidInitialDate, setPrepaidInitialDate] = useState('');
-  const [prepaidControlBalanceStr, setPrepaidControlBalanceStr] = useState('');
   const [prepaidCardLabel, setPrepaidCardLabel] = useState('');
   const [prepaidLast4Digits, setPrepaidLast4Digits] = useState('');
 
@@ -58,18 +56,17 @@ export const AccountConfigModal: React.FC = () => {
   useEffect(() => {
     if (isOpen) {
       // Main account defaults
-      setMainInitialBalanceStr((mainAccountConfig.initialBalance ?? 3400.00).toString());
-      setMainInitialDate(mainAccountConfig.initialDate || '2026-07-01');
-      setMainControlBalanceStr((mainAccountConfig.controlBalance ?? 3075.00).toString());
+      setMainInitialBalanceStr((mainAccountConfig.initialBalance ?? 3075.00).toString());
+      setMainInitialDate(mainAccountConfig.initialDate || '2026-08-16');
+      setMainControlBalanceStr((mainAccountConfig.initialBalance ?? 3075.00).toString());
       setMainAccountLabel(mainAccountConfig.accountLabel || 'Conto Corrente Principale');
-      setCardDebitMode(mainAccountConfig.cardDebitMode || 'direct_debit');
+      setCardDebitMode(mainAccountConfig.cardDebitMode || 'separate_account');
       const rawDigitsMain = (mainAccountConfig.maskedNumber || '').replace(/[^\d]/g, '');
       setMainLast4Digits(rawDigitsMain);
 
       // Prepaid card defaults
-      setPrepaidInitialBalanceStr((prepaidCardConfig.initialBalance !== undefined ? prepaidCardConfig.initialBalance : 0.00).toString());
-      setPrepaidInitialDate(prepaidCardConfig.initialDate || '2026-07-01');
-      setPrepaidControlBalanceStr((prepaidCardConfig.controlBalance ?? 58.68).toString());
+      setPrepaidInitialBalanceStr((prepaidCardConfig.initialBalance !== undefined ? prepaidCardConfig.initialBalance : 54.68).toString());
+      setPrepaidInitialDate(prepaidCardConfig.initialDate || '2026-08-16');
       setPrepaidCardLabel(prepaidCardConfig.accountLabel || 'Carta prepagata');
       const rawDigitsPrepaid = (prepaidCardConfig.maskedNumber || '').replace(/[^\d]/g, '');
       setPrepaidLast4Digits(rawDigitsPrepaid);
@@ -94,7 +91,7 @@ export const AccountConfigModal: React.FC = () => {
       const balanceNum = parseFloat(cleanBalance);
 
       if (isNaN(balanceNum)) {
-        setErrorMsg('Inserisci un saldo iniziale valido in euro per il Conto Principale (es. 3400.00).');
+        setErrorMsg('Inserisci un saldo iniziale operativo valido in euro per il Conto Principale (es. 3075.00).');
         return;
       }
 
@@ -102,9 +99,6 @@ export const AccountConfigModal: React.FC = () => {
         setErrorMsg('Seleziona una data di riferimento per il Conto Principale.');
         return;
       }
-
-      const cleanControl = mainControlBalanceStr.replace(',', '.').trim();
-      const controlNum = parseFloat(cleanControl);
 
       let masked = '';
       const cleanDigits = mainLast4Digits.replace(/[^\d]/g, '').slice(-4);
@@ -115,7 +109,7 @@ export const AccountConfigModal: React.FC = () => {
       updateMainAccountConfig({
         initialBalance: balanceNum,
         initialDate: mainInitialDate,
-        controlBalance: isNaN(controlNum) ? 3075.00 : controlNum,
+        controlBalance: balanceNum,
         accountLabel: mainAccountLabel.trim() || 'Conto Principale',
         maskedNumber: masked || undefined,
         cardDebitMode,
@@ -126,7 +120,7 @@ export const AccountConfigModal: React.FC = () => {
       const balanceNum = parseFloat(cleanBalance);
 
       if (isNaN(balanceNum)) {
-        setErrorMsg('Inserisci un saldo iniziale valido in euro per la Carta prepagata (es. 0.00).');
+        setErrorMsg('Inserisci un saldo iniziale operativo valido in euro per la Carta prepagata (es. 54.68).');
         return;
       }
 
@@ -134,9 +128,6 @@ export const AccountConfigModal: React.FC = () => {
         setErrorMsg('Seleziona una data di riferimento per la Carta prepagata.');
         return;
       }
-
-      const cleanControl = prepaidControlBalanceStr.replace(',', '.').trim();
-      const controlNum = parseFloat(cleanControl);
 
       let masked = '';
       const cleanDigits = prepaidLast4Digits.replace(/[^\d]/g, '').slice(-4);
@@ -147,7 +138,6 @@ export const AccountConfigModal: React.FC = () => {
       updatePrepaidCardConfig({
         initialBalance: balanceNum,
         initialDate: prepaidInitialDate,
-        controlBalance: isNaN(controlNum) ? 58.68 : controlNum,
         accountLabel: prepaidCardLabel.trim() || 'Carta prepagata',
         maskedNumber: masked || undefined,
         isConfigured: true,
@@ -194,7 +184,7 @@ export const AccountConfigModal: React.FC = () => {
             }`}
           >
             <Building2 className="w-4 h-4 text-cyan-400" />
-            <span>Conto Principale (€ 3.400,00)</span>
+            <span>Conto Principale</span>
           </button>
 
           <button
@@ -207,7 +197,7 @@ export const AccountConfigModal: React.FC = () => {
             }`}
           >
             <CreditCard className="w-4 h-4 text-pink-400" />
-            <span>Carta prepagata (€ 561,68)</span>
+            <span>Carta prepagata</span>
           </button>
         </div>
 
@@ -227,7 +217,7 @@ export const AccountConfigModal: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Saldo Iniziale (€) <span className="text-cyan-400">*</span>
+                    Saldo Iniziale Operativo (€) <span className="text-cyan-400">*</span>
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -238,12 +228,12 @@ export const AccountConfigModal: React.FC = () => {
                       type="text"
                       value={mainInitialBalanceStr}
                       onChange={e => setMainInitialBalanceStr(e.target.value)}
-                      placeholder="3400.00"
+                      placeholder="3075.00"
                       required
                       className="w-full pl-9 pr-4 py-2.5 bg-[#090D16] border border-slate-700/80 rounded-xl text-slate-100 text-sm font-semibold focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition"
                     />
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">Saldo di partenza al 01/07/2026 (€ 3.400,00).</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Saldo operativo di partenza alla data (es. 3075.00 €).</p>
                 </div>
 
                 <div>
@@ -263,31 +253,8 @@ export const AccountConfigModal: React.FC = () => {
                       className="w-full pl-9 pr-4 py-2.5 bg-[#090D16] border border-slate-700/80 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition"
                     />
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">Inizio periodo di riconciliazione.</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Data del saldo operativo (16/08/2026).</p>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
-                  <span>Saldo Contabile Attuale di Controllo (€)</span>
-                  <span className="text-[10px] text-cyan-400 font-normal flex items-center gap-1">
-                    <Scale className="w-3 h-3" /> Per verifica matematica
-                  </span>
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <Euro className="w-4 h-4" />
-                  </div>
-                  <input
-                    id="input-main-control-balance"
-                    type="text"
-                    value={mainControlBalanceStr}
-                    onChange={e => setMainControlBalanceStr(e.target.value)}
-                    placeholder="3075.00"
-                    className="w-full pl-9 pr-4 py-2.5 bg-[#090D16] border border-slate-700/80 rounded-xl text-slate-100 text-sm font-semibold focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition"
-                  />
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1">Valore atteso da estratto conto (€ 3.075,00 = 3.400 + 100 - 425 ricariche).</p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -330,7 +297,7 @@ export const AccountConfigModal: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Saldo Iniziale (€) <span className="text-pink-400">*</span>
+                    Saldo Iniziale Operativo (€) <span className="text-pink-400">*</span>
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -341,12 +308,12 @@ export const AccountConfigModal: React.FC = () => {
                       type="text"
                       value={prepaidInitialBalanceStr}
                       onChange={e => setPrepaidInitialBalanceStr(e.target.value)}
-                      placeholder="0.00"
+                      placeholder="54.68"
                       required
                       className="w-full pl-9 pr-4 py-2.5 bg-[#090D16] border border-slate-700/80 rounded-xl text-slate-100 text-sm font-semibold focus:outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 transition"
                     />
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">Saldo iniziale al 01/07/2026 (€ 0,00).</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Saldo di partenza operativo (€ 54,68).</p>
                 </div>
 
                 <div>
@@ -366,44 +333,8 @@ export const AccountConfigModal: React.FC = () => {
                       className="w-full pl-9 pr-4 py-2.5 bg-[#090D16] border border-slate-700/80 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 transition"
                     />
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">Inizio periodo di spesa prepagata.</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Data del saldo iniziale operativo.</p>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
-                  <span>Saldo Disponibile Attuale di Controllo (€)</span>
-                  <span className="text-[10px] text-pink-400 font-normal flex items-center gap-1">
-                    <Scale className="w-3 h-3" /> Per verifica matematica
-                  </span>
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <Euro className="w-4 h-4" />
-                  </div>
-                  <input
-                    id="input-prepaid-control-balance"
-                    type="text"
-                    value={prepaidControlBalanceStr}
-                    onChange={e => setPrepaidControlBalanceStr(e.target.value)}
-                    placeholder="58.68"
-                    className="w-full pl-9 pr-4 py-2.5 bg-[#090D16] border border-slate-700/80 rounded-xl text-slate-100 text-sm font-semibold focus:outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 transition"
-                  />
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1">Valore attuale carta (€ 58,68 = 561,68 + 425 ricariche - 928 spese).</p>
-                {(() => {
-                  const parsedCtrl = parseFloat(prepaidControlBalanceStr.replace(',', '.').trim());
-                  const calcBal = prepaidAccountSummary.currentBalance;
-                  const previewDelta = isNaN(parsedCtrl) ? 0 : Math.round((calcBal - parsedCtrl) * 100) / 100;
-                  return (
-                    <div className="mt-2 p-2.5 bg-[#090D16] border border-slate-800 rounded-xl text-xs font-mono flex items-center justify-between text-slate-300">
-                      <span>Saldo Calcolato: € {calcBal.toFixed(2)}</span>
-                      <span className={previewDelta === 0 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
-                        Delta Ante-conferma: € {previewDelta > 0 ? `+${previewDelta.toFixed(2)}` : previewDelta.toFixed(2)}
-                      </span>
-                    </div>
-                  );
-                })()}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -22,13 +22,32 @@ import {
   BASE_CATEGORIES 
 } from '../../utils/categoryManager';
 
-const ACCOUNTS: AccountType[] = [
-  'Conto Principale',
-  'Carta di Credito',
-  'Conto Risparmio',
-  'Portafoglio Investimenti',
-  'Contanti',
+export interface CanonicalAccountOption {
+  id: string;
+  label: string;
+  accountType: AccountType;
+}
+
+export const CANONICAL_ACCOUNTS: CanonicalAccountOption[] = [
+  { id: 'main_account', label: 'Conto Principale', accountType: 'Conto Principale' },
+  { id: 'prepaid_card', label: 'Carta prepagata / Carta di credito', accountType: 'Carta prepagata' },
+  { id: 'cash_account', label: 'Contanti', accountType: 'Contanti' },
+  { id: 'to_verify', label: 'Da verificare', accountType: 'Da verificare' },
+  { id: 'savings_account', label: 'Conto Risparmio', accountType: 'Conto Risparmio' },
+  { id: 'investment_portfolio', label: 'Portafoglio Investimenti', accountType: 'Portafoglio Investimenti' },
 ];
+
+export const resolveCanonicalAccountId = (tx?: Partial<Transaction> | null): string => {
+  if (!tx) return 'main_account';
+  if (tx.accountId) return tx.accountId;
+  const raw = `${tx.account || ''} ${tx.paymentMethod || ''} ${tx.accountLabel || ''}`.toLowerCase();
+  if (raw.includes('carta') || raw.includes('credit') || raw.includes('prepaid')) return 'prepaid_card';
+  if (raw.includes('contanti') || raw.includes('cash')) return 'cash_account';
+  if (raw.includes('da verificare') || raw.includes('verificare')) return 'to_verify';
+  if (raw.includes('risparmio')) return 'savings_account';
+  if (raw.includes('investiment')) return 'investment_portfolio';
+  return 'main_account';
+};
 
 export const TransactionModal: React.FC = () => {
   const { 
@@ -52,7 +71,8 @@ export const TransactionModal: React.FC = () => {
   const [categoryLabel, setCategoryLabel] = useState<string>('Casa & Utenze');
   
   const [subcategory, setSubcategory] = useState('');
-  const [account, setAccount] = useState<AccountType>('Carta di Credito');
+  const [accountId, setAccountId] = useState<string>('prepaid_card');
+  const [account, setAccount] = useState<AccountType>('Carta prepagata');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [status, setStatus] = useState<'completed' | 'pending'>('completed');
   const [notes, setNotes] = useState('');
@@ -90,7 +110,13 @@ export const TransactionModal: React.FC = () => {
       }
 
       setSubcategory(editingTransaction.subcategory || '');
-      setAccount(editingTransaction.account);
+      
+      // Resolve structured canonical account id
+      const resolvedAccId = resolveCanonicalAccountId(editingTransaction);
+      setAccountId(resolvedAccId);
+      const matchedAcc = CANONICAL_ACCOUNTS.find(a => a.id === resolvedAccId);
+      setAccount(matchedAcc ? matchedAcc.accountType : (editingTransaction.account || 'Carta prepagata'));
+
       setDate(editingTransaction.date);
       setStatus(editingTransaction.status);
       setNotes(editingTransaction.notes || '');
@@ -103,6 +129,7 @@ export const TransactionModal: React.FC = () => {
       setCategoryId('casa_e_utenze');
       setCategoryLabel('Casa & Utenze');
       setSubcategory('');
+      setAccountId('main_account');
       setAccount('Conto Principale');
       setDate(new Date().toISOString().split('T')[0]);
       setStatus('completed');
@@ -112,23 +139,26 @@ export const TransactionModal: React.FC = () => {
     }
   }, [editingTransaction, modalMode, isModalOpen, fullCatalog]);
 
-  // Adjust category when user explicitly changes type tab
+  // Adjust category and account when user explicitly changes type tab
   const handleTypeChange = (newType: TransactionType) => {
     setType(newType);
     if (newType === 'income') {
       const match = fullCatalog.find(c => c.id === 'stipendio') || fullCatalog.find(c => c.allowedType === 'income');
       setCategoryId(match?.id || 'stipendio');
       setCategoryLabel(match?.label || 'Stipendio');
+      setAccountId('main_account');
       setAccount('Conto Principale');
     } else if (newType === 'expense') {
       const match = fullCatalog.find(c => c.id === 'casa_e_utenze') || fullCatalog.find(c => c.allowedType === 'expense');
       setCategoryId(match?.id || 'casa_e_utenze');
       setCategoryLabel(match?.label || 'Casa & Utenze');
-      setAccount('Carta di Credito');
+      setAccountId('prepaid_card');
+      setAccount('Carta prepagata');
     } else {
       setCategoryId('giroconto_trasferimento');
       setCategoryLabel('Giroconto / Trasferimento');
-      setAccount('Conto Risparmio');
+      setAccountId('main_account');
+      setAccount('Conto Principale');
     }
   };
 
@@ -185,6 +215,10 @@ export const TransactionModal: React.FC = () => {
       .map(t => t.trim())
       .filter(t => t.length > 0);
 
+    const matchedAcc = CANONICAL_ACCOUNTS.find(a => a.id === accountId);
+    const finalAccountType = matchedAcc ? matchedAcc.accountType : account;
+    const finalAccountLabel = matchedAcc ? matchedAcc.label : String(account);
+
     const txPayload = {
       type,
       description: description.trim(),
@@ -194,7 +228,10 @@ export const TransactionModal: React.FC = () => {
       category: categoryLabel, // Maintains full backward compatibility
       rawCategory: editingTransaction?.rawCategory || categoryLabel,
       subcategory: subcategory.trim() || undefined,
-      account,
+      accountId,
+      accountLabel: finalAccountLabel,
+      account: finalAccountType,
+      paymentMethod: editingTransaction?.paymentMethod || finalAccountLabel,
       date,
       status,
       notes: notes.trim() || undefined,
@@ -383,11 +420,20 @@ export const TransactionModal: React.FC = () => {
               <label className="block text-slate-400 font-semibold mb-1">Conto / Metodo</label>
               <select
                 id="transaction-account-select"
-                value={account}
-                onChange={e => setAccount(e.target.value as AccountType)}
+                value={accountId}
+                onChange={e => {
+                  const selected = e.target.value;
+                  setAccountId(selected);
+                  const matched = CANONICAL_ACCOUNTS.find(a => a.id === selected);
+                  if (matched) setAccount(matched.accountType);
+                }}
                 className="w-full px-3 py-2 bg-[#16233F] border border-slate-700 focus:border-cyan-500 rounded-lg text-slate-100 text-xs font-semibold focus:outline-none transition cursor-pointer"
               >
-                {ACCOUNTS.map(a => <option key={a} value={a} className="bg-[#0F172A]">{a}</option>)}
+                {CANONICAL_ACCOUNTS.map(a => (
+                  <option key={a.id} value={a.id} className="bg-[#0F172A]">
+                    {a.label}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

@@ -34,7 +34,8 @@ import {
   getExcelExportFilename 
 } from '../../utils/backupManager';
 import { BackupData, IntegrityCheckResult } from '../../types';
-import { formatCurrency, formatDateItalian } from '../../utils/formatters';
+import { formatCurrency, formatDateItalian, getErrorMessage } from '../../utils/formatters';
+import { VoiceCommandHelp } from '../../features/voice/VoiceCommandHelp';
 
 export const SettingsView: React.FC = () => {
   const { 
@@ -103,11 +104,11 @@ export const SettingsView: React.FC = () => {
         details: `Scaricati ${transactions.length} movimenti, voci di patrimonio, obiettivi e configurazioni personali.`,
         filename: res.filename,
       });
-    } catch (err: any) {
+    } catch (err) {
       setDownloadSuccessMessage({
         type: 'info',
         title: 'Errore esportazione JSON',
-        details: err.message || 'Si è verificato un problema durante la creazione del file.',
+        details: getErrorMessage(err, 'Si è verificato un problema durante la creazione del file.'),
       });
     }
   };
@@ -122,11 +123,11 @@ export const SettingsView: React.FC = () => {
         details: `Scaricati ${res.rowCount} movimenti con intestazioni standard e codifica UTF-8 con BOM.`,
         filename: res.filename,
       });
-    } catch (err: any) {
+    } catch (err) {
       setDownloadSuccessMessage({
         type: 'info',
         title: 'Errore esportazione CSV',
-        details: err.message || 'Impossibile esportare il file CSV.',
+        details: getErrorMessage(err, 'Impossibile esportare il file CSV.'),
       });
     }
   };
@@ -141,11 +142,11 @@ export const SettingsView: React.FC = () => {
         details: `Creata cartella di lavoro con 6 fogli distinti: Movimenti, Conti, Budget, Allocazione, Patrimonio, Obiettivi.`,
         filename: res.filename,
       });
-    } catch (err: any) {
+    } catch (err) {
       setDownloadSuccessMessage({
         type: 'info',
         title: 'Errore esportazione Excel',
-        details: err.message || 'Impossibile esportare la cartella Excel.',
+        details: getErrorMessage(err, 'Impossibile esportare la cartella Excel.'),
       });
     }
   };
@@ -180,8 +181,8 @@ export const SettingsView: React.FC = () => {
           backup: res.backup,
           integrity: res.integrity,
         });
-      } catch (err: any) {
-        setRestoreError(`Errore di lettura del file: ${err.message}`);
+      } catch (err) {
+        setRestoreError(`Errore di lettura del file: ${getErrorMessage(err)}`);
       }
     };
     reader.readAsText(file);
@@ -293,6 +294,8 @@ export const SettingsView: React.FC = () => {
           </button>
         </div>
       )}
+
+      <VoiceCommandHelp />
 
       {/* Download Notification Toast / Banner */}
       {downloadSuccessMessage && (
