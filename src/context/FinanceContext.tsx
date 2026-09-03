@@ -100,7 +100,7 @@ interface FinanceContextType {
 
   // Transactions State & CRUD
   transactions: Transaction[];
-  addTransaction: (tx: Omit<Transaction, 'id'>) => void;
+  addTransaction: (tx: Omit<Transaction, 'id'>) => string;
   updateTransaction: (id: string, updatedTx: Partial<Transaction>) => void;
   updateTransactionType: (id: string, newType: TransactionType) => void;
   completeIncompleteTransfer: (id: string, fromAccountId: string, toAccountId: string) => { success: boolean; message: string };
@@ -141,7 +141,7 @@ interface FinanceContextType {
   addAccount: (input: Omit<Account, 'id' | 'isConfigured'> & { id?: string }) => { success: boolean; message: string; accountId?: string };
   updateAccount: (id: string, partial: Partial<Account>) => void;
   deleteAccount: (id: string) => { success: boolean; message: string };
-  createTransfer: (params: { fromAccountId: string; toAccountId: string; amount: number; date: string; description?: string }) => { success: boolean; message: string };
+  createTransfer: (params: { fromAccountId: string; toAccountId: string; amount: number; date: string; description?: string }) => { success: boolean; message: string; transactionId?: string };
   isAddAccountModalOpen: boolean;
   openAddAccountModal: () => void;
   closeAddAccountModal: () => void;
@@ -829,7 +829,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     return { success: true, message: 'Conto eliminato.' };
   };
 
-  const createTransfer = (params: { fromAccountId: string; toAccountId: string; amount: number; date: string; description?: string }): { success: boolean; message: string } => {
+  const createTransfer = (params: { fromAccountId: string; toAccountId: string; amount: number; date: string; description?: string }): { success: boolean; message: string; transactionId?: string } => {
     const { fromAccountId, toAccountId, amount, date, description } = params;
     if (fromAccountId === toAccountId) {
       return { success: false, message: 'Il conto di origine e destinazione devono essere diversi.' };
@@ -841,7 +841,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       return { success: false, message: 'Inserisci un importo di trasferimento maggiore di zero.' };
     }
     const fromAccount = accounts.find(a => a.id === fromAccountId)!;
-    addTransaction({
+    const transactionId = addTransaction({
       date,
       description: description?.trim() || `Trasferimento a ${accounts.find(a => a.id === toAccountId)?.label || toAccountId}`,
       amount,
@@ -856,7 +856,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       toAccountId,
       status: 'completed',
     });
-    return { success: true, message: 'Trasferimento registrato con successo.' };
+    return { success: true, message: 'Trasferimento registrato con successo.', transactionId };
   };
 
   const openAddAccountModal = () => setIsAddAccountModalOpen(true);
@@ -896,7 +896,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   const closePrepaidConfigModal = () => setIsPrepaidConfigModalOpen(false);
 
   // Transaction CRUD handlers
-  const addTransaction = (txData: Omit<Transaction, 'id'>) => {
+  const addTransaction = (txData: Omit<Transaction, 'id'>): string => {
     const newTx: Transaction = {
       ...txData,
       id: `tx-man-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -908,6 +908,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     setTransactions(prev => [newTx, ...prev]);
     setLastMigrationSnapshot(null); // Invalidates migration undo upon new modifications
     addAuditEntry('create', `Aggiunto movimento manuale: "${newTx.description}" (€ ${newTx.amount.toFixed(2)}) su ${newTx.account}`, 1, [newTx.id]);
+    return newTx.id;
   };
 
   const updateTransaction = (id: string, updatedTx: Partial<Transaction>) => {

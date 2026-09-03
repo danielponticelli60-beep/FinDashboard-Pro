@@ -35,6 +35,7 @@ import {
 } from '../../utils/backupManager';
 import { BackupData, IntegrityCheckResult } from '../../types';
 import { formatCurrency, formatDateItalian, getErrorMessage } from '../../utils/formatters';
+import { VoiceCommandHelp } from '../../features/voice/VoiceCommandHelp';
 
 export const SettingsView: React.FC = () => {
   const { 
@@ -293,6 +294,8 @@ export const SettingsView: React.FC = () => {
           </button>
         </div>
       )}
+
+      <VoiceCommandHelp />
 
       {/* Download Notification Toast / Banner */}
       {downloadSuccessMessage && (

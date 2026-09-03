@@ -5,6 +5,7 @@ import { GlobalFiltersBar } from './components/layout/GlobalFiltersBar';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Database, ShieldCheck } from 'lucide-react';
 import type { ActivePage } from './types';
+import { useVoiceCommandDeepLink } from './features/voice/useVoiceCommandDeepLink';
 
 const DashboardView = lazy(() => import('./components/dashboard/DashboardView').then(m => ({ default: m.DashboardView })));
 const TransactionsView = lazy(() => import('./components/transactions/TransactionsView').then(m => ({ default: m.TransactionsView })));
@@ -24,6 +25,7 @@ const DataDiagnosticsModal = lazy(() => import('./components/diagnostics/DataDia
 const ResetPersonalDataModal = lazy(() => import('./components/diagnostics/ResetPersonalDataModal').then(m => ({ default: m.ResetPersonalDataModal })));
 const TypeMigrationModal = lazy(() => import('./components/transactions/TypeMigrationModal').then(m => ({ default: m.TypeMigrationModal })));
 const CategoryMigrationModal = lazy(() => import('./components/categories/CategoryMigrationModal').then(m => ({ default: m.CategoryMigrationModal })));
+const VoiceCommandReviewModal = lazy(() => import('./features/voice/VoiceCommandReviewModal').then(m => ({ default: m.VoiceCommandReviewModal })));
 
 const PAGE_LABELS: Record<ActivePage, string> = {
   dashboard: 'Dashboard',
@@ -67,6 +69,7 @@ const MainContent: React.FC = () => {
 
 export default function App() {
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const { pendingCommandText, clearPendingCommand } = useVoiceCommandDeepLink();
 
   return (
     <FinanceProvider>
@@ -111,6 +114,12 @@ export default function App() {
               isOpen={isBackupModalOpen}
               onClose={() => setIsBackupModalOpen(false)}
             />
+
+            {/* Voice Command Review Modal - only rendered when a deep-link
+                command is pending; never saves without explicit confirmation */}
+            {pendingCommandText && (
+              <VoiceCommandReviewModal rawText={pendingCommandText} onClose={clearPendingCommand} />
+            )}
           </Suspense>
         </ErrorBoundary>
 
