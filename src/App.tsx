@@ -3,6 +3,7 @@ import { FinanceProvider, useFinance } from './context/FinanceContext';
 import { Navbar } from './components/layout/Navbar';
 import { GlobalFiltersBar } from './components/layout/GlobalFiltersBar';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { QuickActionFab } from './components/layout/QuickActionFab';
 import { Database, ShieldCheck } from 'lucide-react';
 import type { ActivePage } from './types';
 import { useVoiceCommandDeepLink } from './features/voice/useVoiceCommandDeepLink';
@@ -148,6 +149,9 @@ export default function App() {
             </div>
           </div>
         </footer>
+
+        {/* Always-reachable "+" entry point for manual and voice movement entry */}
+        <QuickActionFab />
 
       </div>
     </FinanceProvider>
